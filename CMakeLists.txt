@@ -1,11 +1,23 @@
 cmake_minimum_required(VERSION 3.25)
 project(AYSequence VERSION 0.1.0 LANGUAGES CXX)
 
-# Bootstrap only: no sequence playback or engine installation exists yet.
-# S1 will turn this target into the independent runtime implementation.
-add_library(AYSequence INTERFACE)
+add_library(AYSequence STATIC src/Sequence.cpp)
 add_library(AYSequence::Core ALIAS AYSequence)
-target_compile_features(AYSequence INTERFACE cxx_std_23)
-target_include_directories(AYSequence INTERFACE
+target_compile_features(AYSequence PUBLIC cxx_std_23)
+target_include_directories(AYSequence PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
+
+option(AY_SEQUENCE_BUILD_ASSET_IO "Build sequence JSON/file support (requires AYIO)" ${AY_BUILD_RUNTIME})
+if(AY_SEQUENCE_BUILD_ASSET_IO)
+    find_package(nlohmann_json CONFIG REQUIRED)
+    if(NOT TARGET AYIO)
+        message(FATAL_ERROR "AYSequenceAssetIO requires AYIO; disable AY_SEQUENCE_BUILD_ASSET_IO for standalone Core")
+    endif()
+    add_library(AYSequenceAssetIO STATIC src/SequenceAssetIO.cpp)
+    add_library(AYSequence::AssetIO ALIAS AYSequenceAssetIO)
+    target_link_libraries(AYSequenceAssetIO PUBLIC AYSequence AYIO PRIVATE nlohmann_json::nlohmann_json)
+endif()
+if(BUILD_TESTING AND TARGET AYTest AND TARGET AYSequenceAssetIO)
+    add_subdirectory(unittest)
+endif()

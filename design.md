@@ -1,6 +1,6 @@
 # AYSequence 设计
 
-Version: 0.1.0 · 2026-09-29 · Status: Planned / bootstrap only
+Version: 0.1.0 · 2026-09-29 · Status: S1 implemented; S2–S5 planned
 
 ## 1. 定位与边界
 
@@ -85,4 +85,7 @@ Undo/Redo 复用现有 Editor history；原子领域编辑不在公共控件建�
 
 执行 [根仓最小实现计划](../../AYDocs/SEQUENCE-IMPLEMENTATION-PLAN.md) 的 S1–S5。
 每阶段列出已支持/拒绝项与 AYTest 用例表，通过后提交对应模块与根仓变化；不推送。
-当前只是 S0 初始化，不宣称有序列播放、可打开资产或编辑器功能。
+S1 已实现 Core 与独立 `AYSequenceAssetIO`（不是 Resource 集成）；无场景/编辑器
+接入。Core 的 Value 数组是序列通道 wire 值，不替代引擎 AYMath 几何类型；场景适配
+负责转换。Scale 范围 [1e-6,1e6]，单位 Quaternion norm² 容差 1e-6；ID 全局唯一。
+schema 1 严格拒绝未知字段/重复 key/不支持版本；JSON 16 MiB、32 层。

@@ -1,0 +1,88 @@
+#pragma once
+
+#include <array>
+#include <memory>
+#include <string>
+#include <vector>
+
+namespace ayt::sequence {
+
+using Value = std::array<double, 4>;
+enum class Channel { Position, Rotation, Scale };
+struct Binding { std::string id; };
+struct Key { std::string id; double time = 0; Value value{}; };
+struct TransformTrack {
+    std::string id, binding;
+    Channel channel = Channel::Position;
+    std::vector<Key> keys;
+};
+struct AnimationSection {
+    std::string id, source;
+    double start = 0, end = 0, sourceOffset = 0, speed = 1, sourceDuration = 0;
+};
+struct AnimationTrack { std::string id, binding; std::vector<AnimationSection> sections; };
+struct Event { std::string id; double time = 0; std::string name, payload; };
+struct EventTrack { std::string id; std::vector<Event> events; };
+struct Sequence {
+    std::string id;
+    double duration = 1, displayFps = 30;
+    std::vector<Binding> bindings;
+    std::vector<TransformTrack> transforms;
+    std::vector<AnimationTrack> animations;
+    std::vector<EventTrack> eventTracks;
+};
+struct TransformSample { std::string binding; Channel channel; Value value; };
+struct AnimationSample { std::string binding, section, source; double sourceTime = 0; };
+struct Evaluation {
+    std::vector<TransformSample> transforms;
+    std::vector<AnimationSample> animations;
+};
+struct Diagnostic { std::string location, message; };
+
+/// Validate IDs, finite values, time ranges, supported channels and resource paths.
+/// Limits: 1 day, 1024 bindings, 4096 tracks, 100000 keys, 10000 sections/events.
+bool validate(const Sequence& sequence, Diagnostic* error = nullptr);
+
+/// Immutable owned snapshot. Creation validates before publication; no borrowed data.
+class CompiledSequence final {
+public:
+    /// Return null on invalid input. Animation samples map time only, not poses.
+    static std::shared_ptr<const CompiledSequence> compile(Sequence sequence, Diagnostic* error = nullptr);
+    const Sequence& data() const noexcept { return _data; }
+    /// Direct, event-free seek evaluation. Reject non-finite/out-of-range time.
+    /// Sections are [start,end); only a section ending at sequence duration has a final sample.
+    bool evaluate(double time, Evaluation& output, Diagnostic* error = nullptr) const;
+    const std::vector<Event>& orderedEvents() const noexcept { return _events; }
+private:
+    explicit CompiledSequence(Sequence sequence);
+    Sequence _data;
+    std::vector<Event> _events;
+};
+
+enum class PlaybackState { Stopped, Playing, Paused, Completed };
+struct PlaybackFrame { Evaluation evaluation; std::vector<Event> events; bool completed = false; };
+
+/// Main-thread value-only Once player. No World access, callbacks or global clock.
+/// The owner must advance it exactly once. Outputs own their event data.
+class SequencePlayer final {
+public:
+    /// Bind an immutable snapshot and reset state/time. Null unbinds.
+    void bind(std::shared_ptr<const CompiledSequence> sequence);
+    bool play();
+    void pause() noexcept;
+    void stop() noexcept;
+    /// Reject invalid times without changing state. Seek never queues events.
+    bool seek(double seconds, PlaybackFrame& output, Diagnostic* error = nullptr);
+    /// Positive finite delta only (zero is allowed). First positive tick includes
+    /// the play origin; subsequent ticks use (previous,current]. No looping.
+    bool advance(double deltaSeconds, PlaybackFrame& output, Diagnostic* error = nullptr);
+    double position() const noexcept { return _position; }
+    PlaybackState state() const noexcept { return _state; }
+    const std::shared_ptr<const CompiledSequence>& sequence() const noexcept { return _sequence; }
+private:
+    std::shared_ptr<const CompiledSequence> _sequence;
+    double _position = 0;
+    PlaybackState _state = PlaybackState::Stopped;
+    bool _includeOrigin = false;
+};
+} // namespace ayt::sequence
