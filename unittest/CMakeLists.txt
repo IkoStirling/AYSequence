@@ -1,4 +1,11 @@
 add_executable(AYSequence_UnitTests main.cpp Test_Sequence.cpp)
 target_link_libraries(AYSequence_UnitTests PRIVATE AYSequenceAssetIO AYTest)
+set(_sequence_entity_tests OFF)
+if(TARGET AYSequenceEntityIntegration AND TARGET AYScene)
+    target_sources(AYSequence_UnitTests PRIVATE Test_SceneSequence.cpp)
+    target_link_libraries(AYSequence_UnitTests PRIVATE AYSequenceEntityIntegration AYScene)
+    set(_sequence_entity_tests ON)
+endif()
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/test-features.json" "{\"entity\":\"${_sequence_entity_tests}\"}\n")
 ay_add_test_tiers(AYSequence_UnitTests PREFIX sequence
-    INTEGRATION_SUITES SequenceAssetTests STRESS_SUITES SequenceStressTests TIMEOUT 60)
+    INTEGRATION_SUITES SequenceAssetTests SceneSequenceTests STRESS_SUITES SequenceStressTests TIMEOUT 60 RUN_SERIAL)
