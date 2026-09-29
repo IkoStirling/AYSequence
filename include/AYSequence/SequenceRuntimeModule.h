@@ -33,6 +33,8 @@ private:
     std::vector<HostedSceneFrame> _frames;
     std::uint64_t _lastFrame = std::numeric_limits<std::uint64_t>::max();
     bool _initialized = false;
+    friend bool dispatchSequenceEvents(std::shared_ptr<SceneSequenceSession>, SceneFrame,
+                                      SequenceEventSink, std::size_t&, Diagnostic*);
 };
 
 /// Explicit optional startup node AYSequence.Runtime, requires AYEntity.Runtime.

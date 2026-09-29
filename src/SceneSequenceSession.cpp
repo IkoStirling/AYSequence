@@ -13,6 +13,7 @@ namespace ayt::sequence {
 namespace {
 using ayt::entity::World; using ayt::entity::EntityHandle; using ayt::entity::Transform;
 struct Registry {
+    std::uint64_t nextSession = 0;
     std::vector<SceneSequenceSession*> sessions;
     std::map<std::pair<World*, std::uint32_t>, SceneSequenceSession*> claims;
 };
@@ -45,11 +46,15 @@ struct SceneSequenceSession::Impl {
     std::map<std::string, EntityHandle> bindings;
     std::vector<Held> held;
     std::uint64_t generation = 1;
+    std::uint64_t owner = 0, batch = 0, dispatched = 0;
+    bool dispatching = false;
+    std::unique_ptr<SceneAnimationDriver> animation;
     SequenceSubSystem* host = nullptr;
     Diagnostic error;
 };
 SceneSequenceSession::SceneSequenceSession() : _impl(std::make_unique<Impl>()) {
     auto& r = registry();
+    _impl->owner = ++r.nextSession;
     if (r.sessions.empty() && !ayt::entity::registerWorldBeforeShutdownCallback(&r, &beforeWorldShutdown)) throw std::runtime_error("Cannot register sequence World lifecycle guard");
     r.sessions.push_back(this);
 }
@@ -64,9 +69,14 @@ void SceneSequenceSession::beforeWorldShutdown(World& w) noexcept {
 }
 bool SceneSequenceSession::bind(World& w, std::shared_ptr<const CompiledSequence> s,
                                const std::map<std::string, std::uint32_t>& ids, Diagnostic* e) {
+    return bind(w,std::move(s),ids,std::unique_ptr<SceneAnimationDriver>{},e);
+}
+bool SceneSequenceSession::bind(World& w, std::shared_ptr<const CompiledSequence> s,
+                               const std::map<std::string, std::uint32_t>& ids,
+                               std::unique_ptr<SceneAnimationDriver> animation, Diagnostic* e) {
     auto fail = [&](std::string msg) { if (e) *e = {"binding",std::move(msg)}; return false; };
     if (!s || !w.isInitialized()) return fail("Expected initialized World and compiled sequence");
-    if (!s->data().animations.empty()) return fail("S2 does not apply animation sections; use Core mapping until S3");
+    if (!s->data().animations.empty() && !animation) return fail("Animation sections require AYSequence::AnimationIntegration");
     if (ids.size() != s->data().bindings.size()) return fail("Binding table must match all declared bindings");
     std::map<std::string, EntityHandle> next;
     for (const auto& b : s->data().bindings) {
@@ -79,7 +89,10 @@ bool SceneSequenceSession::bind(World& w, std::shared_ptr<const CompiledSequence
     std::vector<std::uint32_t> unique; for (const auto& [id,h] : next) unique.push_back(h.id);
     std::sort(unique.begin(),unique.end());
     if (std::adjacent_find(unique.begin(),unique.end()) != unique.end()) return fail("Bindings must target distinct Entities");
+    if (animation && !animation->prepare(w,*s,ids,e)) return false;
+    for (const auto& [id,h] : next) if (!transform(w,h) || conflict(w,h)) return fail("Binding changed during resource preparation: " + id);
     stop(); _impl->world = &w; _impl->bindings = std::move(next); _impl->player.bind(std::move(s));
+    _impl->animation = std::move(animation);
     _impl->error = {}; if (e) *e = {}; return true;
 }
 bool SceneSequenceSession::acquire(Diagnostic* e) {
@@ -87,6 +100,7 @@ bool SceneSequenceSession::acquire(Diagnostic* e) {
     if (!p.world || !p.player.sequence()) { if (e) *e = {"world","Unbound or revoked World"}; return false; }
     if (!p.held.empty()) return check(e);
     std::vector<Impl::Held> pending;
+    if (!check(e)) return false;
     for (const auto& [binding,h] : p.bindings) {
         const auto& tracks = p.player.sequence()->data().transforms;
         if (std::none_of(tracks.begin(),tracks.end(),[&](const TransformTrack& t) { return t.binding == binding; })) continue;
@@ -97,6 +111,7 @@ bool SceneSequenceSession::acquire(Diagnostic* e) {
         }
         pending.push_back({h,t,*t,*t});
     }
+    if (p.animation && !p.animation->acquire(e)) return false;
     for (const auto& held : pending) registry().claims.emplace(std::make_pair(p.world,held.handle.id),this);
     p.held = std::move(pending); return true;
 }
@@ -119,11 +134,14 @@ bool SceneSequenceSession::check(Diagnostic* e) {
             stop(); return false;
         }
     }
+    Diagnostic animationError;
+    if (p.animation && !p.animation->check(&animationError)) { p.error=std::move(animationError); if (e) *e=p.error; stop(); return false; }
     return true;
 }
 bool SceneSequenceSession::apply(const Evaluation& evaluation, Diagnostic* e) {
     if (!check(e)) return false;
     auto& p = *_impl;
+    if (p.animation && !p.animation->sample(evaluation,e)) { stop(); return false; }
     // Preflight every target before any write. No user callback occurs here.
     for (const auto& sample : evaluation.transforms) {
         const auto h = p.bindings.at(sample.binding);
@@ -134,10 +152,12 @@ bool SceneSequenceSession::apply(const Evaluation& evaluation, Diagnostic* e) {
         t->previousPosition = t->position; t->previousRotation = t->rotation; t->hasPreviousSimulationPose = false;
     }
     for (auto& held : p.held) held.expected = *transform(*p.world,held.handle);
+    if (p.animation) p.animation->apply();
     return true;
 }
 void SceneSequenceSession::release() noexcept {
     auto& p = *_impl;
+    if (p.animation) p.animation->release();
     for (const auto& held : p.held) {
         auto claim = registry().claims.find({p.world,held.handle.id});
         if (claim == registry().claims.end() || claim->second != this) continue;
@@ -170,17 +190,49 @@ bool SceneSequenceSession::seek(double seconds, SceneFrame& out, Diagnostic* e) 
     SceneFrame next;
     if (!_impl->player.seek(seconds,next.playback,e) || !apply(next.playback.evaluation,e)) return false;
     ++_impl->generation; // Invalidate any queued batch from before this seek.
-    next.generation = _impl->generation; out = std::move(next); return true;
+    stamp(next); out = std::move(next); return true;
 }
 bool SceneSequenceSession::step(double dt, SceneFrame& out, Diagnostic* e) {
     if (!check(e)) return false;
     SceneFrame next;
     if (!_impl->player.advance(dt,next.playback,e)) return false;
     if (_impl->player.state() == PlaybackState::Stopped && _impl->held.empty()) { if (e) *e = {"playback","Play or seek before advancing scene session"}; return false; }
-    if (_impl->player.state() != PlaybackState::Playing && !next.playback.completed) { next.generation = _impl->generation; out = std::move(next); return true; }
+    if (_impl->player.state() != PlaybackState::Playing && !next.playback.completed) { stamp(next); out = std::move(next); return true; }
     if (!apply(next.playback.evaluation,e)) return false;
     if (next.playback.completed) release();
-    next.generation = _impl->generation; out = std::move(next); return true;
+    stamp(next); out = std::move(next); return true;
+}
+void SceneSequenceSession::stamp(SceneFrame& out) {
+    out.generation = _impl->generation; out.owner = _impl->owner; out.batch = ++_impl->batch;
+}
+bool dispatchSequenceEvents(std::shared_ptr<SceneSequenceSession> session, SceneFrame frame,
+                            SequenceEventSink sink, std::size_t& delivered, Diagnostic* e) {
+    delivered = 0;
+    auto fail = [&](const char* message) { if (e) *e = {"events",message}; return false; };
+    if (!session || !sink) return fail("Expected live session and event sink");
+    auto& p = *session->_impl;
+    if (p.dispatching || frame.owner != p.owner || !frame.batch || frame.batch > p.batch || frame.batch <= p.dispatched
+        || !session->isCurrent(frame.generation)) return fail("Stale, foreign, replayed or nested event batch");
+    p.dispatched = frame.batch; p.dispatching = true;
+    struct Guard { bool& flag; ~Guard() { flag = false; } } guard{p.dispatching};
+    for (const auto& event : frame.playback.events) {
+        if (p.host) {
+            // Hold the provider callable across potential host changes.
+            auto provider=p.host->_provider;
+            World* current=nullptr;
+            try { current=provider(); }
+            catch (...) { session->stop(); return fail("World provider threw; events canceled"); }
+            if (p.world!=current) {
+                session->stop(); p.world=nullptr; p.bindings.clear();
+                return fail("Active World changed; remaining events canceled and explicit rebind required");
+            }
+        }
+        if (!session->isCurrent(frame.generation) || !session->check(e)) return fail("Playback or binding changed; remaining events canceled");
+        try { ++delivered; sink(event); }
+        catch (...) { session->stop(); return fail("Event callback threw; playback stopped"); }
+    }
+    if (e) *e = {};
+    return true;
 }
 bool SceneSequenceSession::advance(double dt, SceneFrame& out, Diagnostic* e) {
     if (_impl->host) { if (e) *e = {"tick","Hosted session cannot be manually advanced"}; return false; }

@@ -1,6 +1,6 @@
 # AYSequence 设计
 
-Version: 0.1.0 · 2026-09-29 · Status: S1 / S2 implemented; S3–S5 planned
+Version: 0.1.0 · 2026-09-29 · Status: S1 / S2 / S3 implemented; S4–S5 planned
 
 ## 1. 定位与边界
 
@@ -13,7 +13,7 @@ AYAnimation 子系统。第一版不是完整影视 Sequencer，也不支持任�
 | AYSequence / AYSequence::Core | 值对象、校验、时间映射、求值、播放器状态、事件穿越 | 标准库与必要数学基础；无 World/UI/设备依赖 |
 | AYSequenceAssetIO | schema 1 严格 loose 读写；Resource 注册/依赖枚举另待后续 | Core、AYIO 与 JSON |
 | AYSequenceEntityIntegration | 绑定解析、Transform 应用、生命周期/控制权、可选 Host 调度 | Core、AYEntityCore、AYGameLoop；不链接 AYEntity 完整 facade |
-| AYSequenceAnimationIntegration (Planned) | 既有 Clip 的时间采样与姿势应用 | Entity integration、AYAnimation 与必要资源接口 |
+| AYSequenceAnimationIntegration | 既有 Clip 快照、时间采样、骨骼姿势 lease/恢复 | Entity integration、AYEntityAnimationIntegration、AYAnimation、AYResource；无 Renderer |
 | AYSequenceEditorCore (Planned) | 文档数据、原子编辑、验证、预览状态 | Core；无 AYEditor/AYUI |
 | AYEditor sequence extension (Planned) | 文档/历史、内容浏览、轨道界面、隔离场景预览 | 作者核心、可选 integration、公共 AYUI 作者控件 |
 
@@ -102,4 +102,28 @@ Game clock/Scaled，初始化依赖 Entity。此阶段在真实 GameLoop 中先�
 同 World phase 的负 priority 不保证越过依赖排序，不能用于此契约。
 最多 64 sessions；frameCount 防止双 tick，hosted session 拒绝手动推进。
 当帧 owned 输出经 takeFrames 消费；seek/stop/rebind/新一轮播放/World 撤销令旧
-generation 失效，调用者在每个事件回调前检查。S2 不安装回调或骨骼驱动。
+generation 失效，调用者在每个事件回调前检查。S3 增加可选骨骼适配与显式事件派发。
+
+## 7. S3 已实现契约
+
+- 绑定阶段通过宿主 ResourceManager + resolveAssetPath 同步取得 Ready 的标准
+  Animation 资源；校验并复制不可变 Clip/Skeleton 快照，resolver 不进入逐帧路径。
+  Source duration 以实际 Clip 为准；骨名必须属于目标骨架，不隐式修复/重定向。
+- 目标必须先准备 loaded SkeletonComponent/skinMatrices。只接受 Override 骨名
+  TRS 与 Linear/Step/CubicHermite；Float/additive/未知骨/坏形状或数值显式拒绝。
+  1..1024 bones，Clip 4096 tracks/100000 keys，合计键/切线 payload 64 MiB。
+- 独立 AnimationPlayer 只 setTime/evaluate，无 tick/Clip Notify。片段端点规则沿用
+  S1；间隙用捕获基态，直接 seek 与连续播放一致。全部骨骼姿势预采样成功才写 World，
+  不出现 Transform 已写而骨骼求值失败的部分提交。
+- SkeletonComponent 的主线程 externalPoseOwner 让内建 Animation/BlendSpace/
+  StateMachine 在各自更新入口跳过对象。原 player/图/资产字段不改，停止后从原时间
+  继续；不承诺追赶墙钟。pause 不写，完成立即恢复，只保留 owned 最终求值输出。
+- 目标组件/蒙皮数组/骨架/原 player 身份、原 player 时间/暂停状态、输出矩阵和 lease
+  被外部改动则停止。恢复仅作用于仍未变化的 owned target；转移 lease 不清除新 owner。
+  其他 writer 必须遵守 lease，该检测不是通用 setter 锁，也不恢复外部 writer 的状态。
+- dispatchSequenceEvents 按值持有 session/frame/sink；owner/batch/generation 防跨会话、
+  重放、过期、嵌套派发。每个回调前预检；stop/seek/rebind/销毁/World teardown 取消
+  余下事件。异常捕获后停止，返回已进入回调数；Host tick 只排队，取出后再显式派发。
+- 仍无 `.ayseq` Resource loader、cook/pak、相机/音频、混合/Root Motion、Editor 页面。
+- 骨架兼容检查是合法目标拓扑和轨道骨名/类型，不是源骨架 GUID/语义证明；当前
+  `.ayanm` 不携带源骨架拓扑。宿主须提供已针对目标骨架制作/烘焙的 Clip。

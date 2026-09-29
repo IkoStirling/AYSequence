@@ -158,4 +158,53 @@ TEST_CASE(duplicate_claim_failure_never_partially_acquires_other_targets) {
     single.id="other"; single.bindings={{"right"}}; single.transforms[0].binding="right"; single.transforms[0].id="other-track";
     SceneSequenceSession c; CHECK_TRUE(c.bind(f.scene.world(),CompiledSequence::compile(single),{{"right",f.right->getId()}})); CHECK_TRUE(c.play()); c.stop(); CHECK(f.right->getComponent<Transform>()->scale.x==5);
 }
+TEST_CASE(event_dispatch_is_owned_once_and_rejects_foreign_batches) {
+    Fixture f; auto a=f.session(); auto b=f.session(); a->play(); SceneFrame frame; a->advance(4,frame);
+    std::size_t delivered=0; std::vector<std::string> names;
+    CHECK_FALSE(dispatchSequenceEvents(b,frame,[&](const Event& e){names.push_back(e.name);},delivered)); CHECK(delivered==0);
+    CHECK_TRUE(dispatchSequenceEvents(a,frame,[&](const Event& e){names.push_back(e.name);},delivered)); CHECK(delivered==2); CHECK(names.size()==2);
+    CHECK_FALSE(dispatchSequenceEvents(a,frame,[](const Event&){},delivered)); CHECK(delivered==0);
+}
+TEST_CASE(event_callback_stop_seek_and_rebind_cancel_remaining_batch) {
+    for (int action=0;action<3;++action) {
+        Fixture f; auto s=f.session(); s->play(); SceneFrame frame; s->advance(4,frame); std::size_t delivered=0;
+        CHECK_FALSE(dispatchSequenceEvents(s,frame,[&](const Event&){
+            if (action==0) s->stop();
+            else if (action==1) { SceneFrame seek; s->seek(1,seek); }
+            else s->bind(f.scene.world(),CompiledSequence::compile(model()),f.ids());
+        },delivered)); CHECK(delivered==1);
+    }
+}
+TEST_CASE(event_callback_deletion_and_world_shutdown_cancel_remaining_batch) {
+    for (bool shutdown : {false,true}) {
+        Fixture f; auto s=f.session(); s->play(); SceneFrame frame; s->advance(4,frame); std::size_t delivered=0;
+        CHECK_FALSE(dispatchSequenceEvents(s,frame,[&](const Event&){
+            if (shutdown) f.scene.world().shutdown(); else f.scene.world().destroyEntity(f.left);
+        },delivered)); CHECK(delivered==1);
+    }
+}
+TEST_CASE(event_callback_exception_stops_and_restores) {
+    Fixture f; auto s=f.session(); s->play(); SceneFrame frame; s->advance(1,frame); std::size_t delivered=0; Diagnostic error;
+    CHECK_FALSE(dispatchSequenceEvents(s,frame,[](const Event&){throw std::runtime_error("callback");},delivered,&error));
+    CHECK(delivered==1); CHECK_FALSE(error.message.empty()); CHECK(s->state()==PlaybackState::Stopped); CHECK(f.left->getComponent<Transform>()->position.x==10);
+}
+TEST_CASE(event_dispatch_holds_session_and_sink_and_rejects_nested_replay) {
+    Fixture f; auto s=f.session(); s->play(); SceneFrame frame; s->advance(4,frame); std::weak_ptr<SceneSequenceSession> weak=s;
+    SequenceEventSink sink; std::size_t delivered=0, nested=0;
+    sink=[&](const Event&){ auto retained=weak.lock(); CHECK_TRUE(bool(retained)); CHECK_FALSE(dispatchSequenceEvents(retained,frame,[](const Event&){},nested)); s.reset(); sink={}; };
+    CHECK_TRUE(dispatchSequenceEvents(s,frame,sink,delivered)); CHECK(delivered==2); CHECK(nested==0); CHECK_FALSE(bool(s)); CHECK_TRUE(weak.expired());
+}
+TEST_CASE(host_removed_during_event_dispatch_releases_without_invalidating_iteration) {
+    Fixture f; auto s=f.session(); SequenceSubSystem host([&]{return &f.scene.world();}); host.initialize(); host.addSession(s); s->play();
+    ayt::game::FrameContext context; context.frameCount=1; context.deltaTime=4; host.tick(ayt::game::FramePhase::Gameplay,context);
+    auto frames=host.takeFrames(); std::size_t delivered=0;
+    CHECK_FALSE(dispatchSequenceEvents(frames[0].session,frames[0].frame,[&](const Event&){host.removeSession(s);},delivered)); CHECK(delivered==1);
+}
+TEST_CASE(active_world_switch_in_callback_cancels_without_waiting_for_next_host_tick) {
+    Fixture f; Fixture g; auto s=f.session(); World* active=&f.scene.world(); SequenceSubSystem host([&]{return active;}); host.initialize(); host.addSession(s); s->play();
+    ayt::game::FrameContext context; context.frameCount=1; context.deltaTime=4; host.tick(ayt::game::FramePhase::Gameplay,context);
+    auto frames=host.takeFrames(); std::size_t delivered=0;
+    CHECK_FALSE(dispatchSequenceEvents(s,frames[0].frame,[&](const Event&){active=&g.scene.world();},delivered)); CHECK(delivered==1);
+    CHECK_FALSE(s->isCurrent(frames[0].frame.generation)); CHECK(g.left->getComponent<Transform>()->position.x==10); CHECK_FALSE(s->play());
+}
 TEST_SUITE_END

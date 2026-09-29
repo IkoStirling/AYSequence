@@ -2,10 +2,11 @@
 
 场景序列编排模块，独立于骨骼动画求值与编辑器产品层。
 
-**当前状态：S1 / S2 已实现，2026-09-29。** 独立 owned 快照求值、Once 播放器、
+**当前状态：S1 / S2 / S3 已实现，2026-09-29。** 独立 owned 快照求值、Once 播放器、
 Transform/动画源时间/事件轨道、严格 JSON 和原子 loose `.ayseq` 保存加载；
 单场景 Transform 绑定、独占控制与基态恢复、可选 Host 单一 tick 集成。
-实际骨骼驱动、编辑器页面及发布仍未交付；无默认 Host 装配。
+实际骨骼片段采样、姿势 lease/恢复与安全事件派发；编辑器页面及发布仍未交付，
+无默认 Host 装配。
 
 模块边界和播放契约见 [design.md](design.md)；连续实施顺序、优先级与验收见
 [最小实现计划](../../AYDocs/SEQUENCE-IMPLEMENTATION-PLAN.md)。
@@ -21,11 +22,13 @@ Transform/动画源时间/事件轨道、严格 JSON 和原子 loose `.ayseq` �
   `AYSequenceAssetIO` / `AYSequence::AssetIO` 可选，依赖 AYIO/JSON，不是 Resource loader。
   `AYSequenceEntityIntegration` / `AYSequence::EntityIntegration` 可选，依赖
   Core、AYEntityCore、AYGameLoop；不依赖 AYScene、Renderer 或 AYAnimation。
+  `AYSequenceAnimationIntegration` / `AYSequence::AnimationIntegration` 可选，依赖
+  Entity integration 与 AYEntityAnimationIntegration/AYAnimation/AYResource。
 
 可在配置好 C++ 编译器的环境中单独配置：
 
 ```powershell
-cmake -S AYRuntime/AYSequence -B out/build/sequence-bootstrap -DAY_SEQUENCE_BUILD_ASSET_IO=OFF -DAY_SEQUENCE_BUILD_ENTITY_INTEGRATION=OFF
+cmake -S AYRuntime/AYSequence -B out/build/sequence-bootstrap -DAY_SEQUENCE_BUILD_ASSET_IO=OFF -DAY_SEQUENCE_BUILD_ENTITY_INTEGRATION=OFF -DAY_SEQUENCE_BUILD_ANIMATION_INTEGRATION=OFF
 cmake --build out/build/sequence-bootstrap
 ```
 
@@ -34,7 +37,8 @@ cmake --build out/build/sequence-bootstrap
 运行时核心不依赖 AYEditor、AYUI、AYScene、AYRenderer、AYAudio 或 AYAnimation。
 World/动画/音频/相机桥接由独立可选 integration targets 承担；UI-free 作者核心
 通过 AYEditor 薄适配接入，复用已有公共作者控件。Entity integration 已实现；
-动画/音频/相机 integration 和作者核心/Editor targets 尚未创建。
+骨骼 Animation integration 也已实现；音频/相机 integration 和作者核心/Editor
+targets 尚未创建。
 
 ## S1 使用
 
@@ -66,16 +70,68 @@ if (session->bind(world, compiled,
 ID 只在当前 World 解析，不持久化、不冒充 GUID。对象删除、组件替换、清场及
 World teardown 安全撤销绑定；重新使用需显式 bind。第一版独占整个 Transform，
 拒绝 physics/SimTransform，其他 gameplay writer 须宿主显式让出控制。所有权检测
-不是 setter 锁；外部写入后不会用旧基态覆盖新值。Scene bind 拒绝动画轨道，S3 再接。
+不是 setter 锁；外部写入后不会用旧基态覆盖新值。无 animation driver 的 bind
+仍拒绝动画轨道；S3 使用下面的可选适配。
 
 Host 模式显式安装 `SequenceRuntimeModule`（requires `AYEntity.Runtime`），经其
 已安装的 `SequenceSubSystem::addSession` 接入。Gameplay phase 先于 Entity.World，
 Game clock/Scaled、每帧一次；不要另调手动 advance 或重复 World 更新。
 默认 Host 不自动装配；最多 64 sessions。`takeFrames` 仅保留当帧 owned 输出，
 派发每个事件前须检查 session 的 `isCurrent(generation)`；seek/stop/rebind/新一轮
-播放/换 World 使旧批次失效。当前没有事件回调执行器，S3 再定义宿主派发。
+播放/换 World 使旧批次失效。S3 提供下述显式安全派发器，不在 tick 内执行回调。
+
+## S3 骨骼片段与事件
+
+目标须先经既有角色加载流程准备好 loaded SkeletonComponent、skinMatrices 与
+匹配 jointCount。链接 `AYSequence::AnimationIntegration`，使用宿主的资源服务：
+
+```cpp
+#include <AYSequence/AnimationSequenceDriver.h>
+auto driver = ayt::sequence::makeResourceAnimationSequenceDriver(*host.resources()); // 须非空。
+session->bind(world, compiled, entities, std::move(driver), &error);
+session->play(&error);
+ayt::sequence::SceneFrame frame;
+session->advance(deltaSeconds, frame, &error); // Host 模式改为消费 takeFrames。
+std::size_t delivered = 0;
+ayt::sequence::dispatchSequenceEvents(session, std::move(frame),
+    [](const ayt::sequence::Event& event) { /* 宿主按名称路由；无内嵌脚本 */ },
+    delivered, &error);
+```
+
+资源根与 loaders 由宿主配置；适配通过 `resolveAssetPath` 后调用 ResourceManager，
+Ready 状态才接受，绑定阶段复制 standard Animation 与 Skeleton 快照。也提供
+`makeAnimationSequenceDriver(resolver)` 供测试/工具注入；resolver 只在 bind 调用，
+不得改变 World 生命周期。Clip 后续 unload、cache eviction 或源 Clip 修改不会
+影响当前快照；重新绑定才应用修改。目标 skeleton 原地变动则安全停止，不隐式重定向。
+
+仅普通 Override 骨名 TRS：Linear/Step/CubicHermite，拒绝 Float/additive/未知骨名、
+重复通道、坏数组/时间/Quaternion、非匹配实际 sourceDuration 与越界片段。
+骨架 1..1024 bones、每 Clip 4096 tracks/100000 keys、合计键/切线 payload 64 MiB。
+兼容验证基于目标拓扑与轨道骨名/类型；现有 `.ayanm` 不携带源骨架拓扑，不能据此
+证明同名骨架的语义兼容。宿主须使用已针对目标骨架制作/烘焙的 Clip，不自动重定向。
+适配用独立 AnimationPlayer setTime/evaluate，不 tick，不触发 Clip Notify；只有
+Sequence 自身 event 轨道可派发。空档回到捕获基态，不沿用上一片段姿势。
+
+`externalPoseOwner` 期间原 Animation/BlendSpace/StateMachine 都冻结，不修改原
+播放器、组件资产字段或图状态；pause 保持序列姿势。stop/完成/析构恢复未被外部
+改写的蒙皮矩阵并释放 lease，原控制器随后从原播放时间继续，而非追赶已过墙钟时间。
+完成的终点样本是 owned 输出，完成即恢复，不承诺终点姿势再呈现一帧。
+
+派发器按值持有 session、frame 和 sink；批次带 owner/batch/generation，拒绝重放、
+跨 session、过期和嵌套派发。每个回调前检查实体与控制权；回调 stop/seek/rebind、
+删除对象、换/关 World 后取消剩余事件；异常停止恢复并返回失败及已进入回调数。
+Host 的事件须取出后显式派发，不在系统 tick 遍历 session 列表时调用用户代码。
 
 ## 验证记录（2026-09-29）
+
+S3 full：AYSequence 65/65（fast 15 / integration 49 / stress 1）、AYAnimation 296/296，
+合计 361/361；0 跳过/问题/漏报，inventory 无遗漏/重复。报告
+`out/sequence-s3-commit-check/a92dfe5f8b3448f981cfbb8c22c6ca12/cases.json`。
+AYScene / AYGameLoop 定向 CTest 均通过。SDK doctor：52 capabilities、47 modules、
+11 search cases、57 entry symbols，0 errors / warnings。不是 Editor 视觉或全平台回归。
+关闭序列骨骼适配，以及进一步关闭整个 AYAnimation，均通过基础序列 full 47/47；
+独立 Core（三个 integration 选项 OFF）构建通过。裁剪报告：
+`out/sequence-s3-no-runtime-animation/7c0ef9e721e9457faf1c3ce97aa32d38/cases.json`。
 
 S2 full 回归：40/40 用例，fast 15 / integration 24 / stress 1；inventory 无遗漏/重复，
 报告 `out/sequence-s2-final/74b9640b1c774b7c9a2d0690baa71ecd/cases.json`。
