@@ -2,6 +2,7 @@
 #include <AYIO/File.h>
 #include <nlohmann/json.hpp>
 #include <filesystem>
+#include <algorithm>
 #include <stdexcept>
 #include <unordered_set>
 
@@ -29,11 +30,17 @@ bool decodeSequence(std::string_view bytes, Sequence& output, Diagnostic* e) {
             if (event == Json::parse_event_t::object_end) objectKeys.pop_back();
             return true;
         });
-        fields(j, {"type", "version", "id", "duration", "displayFps", "bindings", "transforms", "animations", "eventTracks"});
-        if (j.at("type") != "authoring.scene-sequence" || !j.at("version").is_number_integer() || j.at("version") != 1) return fail(e, "Unsupported sequence type/version");
+        if (j.at("type") != "authoring.scene-sequence" || !j.at("version").is_number_integer() || (j.at("version") != 1 && j.at("version") != 2)) return fail(e, "Unsupported sequence type/version");
+        const bool authoring = j.at("version") == 2;
+        if (authoring) fields(j, {"type", "version", "id", "duration", "displayFps", "bindings", "transforms", "animations", "eventTracks", "scenePath"});
+        else fields(j, {"type", "version", "id", "duration", "displayFps", "bindings", "transforms", "animations", "eventTracks"});
         Sequence s; s.id = j.at("id").get<std::string>(); s.duration = number(j.at("duration")); s.displayFps = number(j.at("displayFps"));
+        if (authoring) s.scenePath = j.at("scenePath").get<std::string>();
         arrayLimit(j.at("bindings"), 1024); arrayLimit(j.at("transforms"), 4096); arrayLimit(j.at("animations"), 4096); arrayLimit(j.at("eventTracks"), 4096);
-        for (const auto& b : j.at("bindings")) { fields(b, {"id"}); s.bindings.push_back({b.at("id").get<std::string>()}); }
+        for (const auto& b : j.at("bindings")) {
+            if (authoring) fields(b, {"id", "entityName"}); else fields(b, {"id"});
+            s.bindings.push_back({b.at("id").get<std::string>(), authoring ? b.at("entityName").get<std::string>() : std::string{}});
+        }
         std::size_t keys = 0, sections = 0, events = 0;
         for (const auto& tr : j.at("transforms")) {
             fields(tr, {"id", "binding", "channel", "keys"});
@@ -71,7 +78,13 @@ bool encodeSequence(const Sequence& s, std::string& output, Diagnostic* e) {
     if (!validate(s, e)) return false;
     try {
         Json j = {{"type", "authoring.scene-sequence"}, {"version", 1}, {"id", s.id}, {"duration", s.duration}, {"displayFps", s.displayFps}, {"bindings", Json::array()}, {"transforms", Json::array()}, {"animations", Json::array()}, {"eventTracks", Json::array()}};
-        for (const auto& b : s.bindings) j["bindings"].push_back({{"id", b.id}});
+        const bool authoring = !s.scenePath.empty() || std::any_of(s.bindings.begin(), s.bindings.end(), [](const Binding& b) { return !b.entityName.empty(); });
+        if (authoring) { j["version"] = 2; j["scenePath"] = s.scenePath; }
+        for (const auto& b : s.bindings) {
+            Json binding = {{"id", b.id}};
+            if (authoring) binding["entityName"] = b.entityName;
+            j["bindings"].push_back(std::move(binding));
+        }
         for (const auto& tr : s.transforms) {
             Json keys = Json::array();
             for (const auto& k : tr.keys) { Json value = Json::array(); for (int i = 0; i < (tr.channel == Channel::Rotation ? 4 : 3); ++i) value.push_back(k.value[i]); keys.push_back({{"id", k.id}, {"time", k.time}, {"value", value}}); }

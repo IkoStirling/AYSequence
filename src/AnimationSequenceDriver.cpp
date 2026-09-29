@@ -140,10 +140,10 @@ public:
                 || !c->jointCount || c->jointCount>1024 || c->jointCount!=c->skeleton->getBoneCount())
                 return fail(e,track.binding,"Target must have a prepared loaded SkeletonComponent (1..1024 bones)");
             t.identity=c; t.source=c->skeleton; t.path=c->skeletonPath; t.snapshot=std::make_shared<Skeleton>();
-            t.snapshot->setBoneCount(c->jointCount); std::set<std::string> names;
+            if (!validateAnimationSequenceSkeleton(*c->skeleton, e)) return false;
+            t.snapshot->setBoneCount(c->jointCount);
             for (std::size_t i=0;i<c->jointCount;++i) {
                 const auto& b=c->skeleton->getBones()[i];
-                if (!validBone(b,i) || !names.insert(b.name).second) return fail(e,track.binding,"Invalid skeleton names, topology or rest transforms");
                 t.snapshot->setBone(i,b);
             }
             t.pending.resize(c->jointCount); t.expected.resize(c->jointCount); t.baseline.resize(c->jointCount);
@@ -215,6 +215,23 @@ public:
     }
 };
 } // namespace
+bool validateAnimationSequenceSkeleton(const ayt::resource::ISkeleton& skeleton, Diagnostic* error) {
+    if (error) *error = {};
+    const auto count = skeleton.getBoneCount();
+    if (!count || count > 1024 || !skeleton.getBones()) {
+        if (error) *error = {"skeleton", "Expected 1..1024 readable bones"};
+        return false;
+    }
+    std::set<std::string> names;
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto& bone = skeleton.getBones()[i];
+        if (!validBone(bone, i) || !names.insert(bone.name).second) {
+            if (error) *error = {"skeleton", "Invalid skeleton names, topology or rest transforms"};
+            return false;
+        }
+    }
+    return true;
+}
 std::unique_ptr<SceneAnimationDriver> makeAnimationSequenceDriver(AnimationResolver resolver) {
     return std::make_unique<Driver>(std::move(resolver));
 }

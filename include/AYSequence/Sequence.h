@@ -9,20 +9,22 @@ namespace ayt::sequence {
 
 using Value = std::array<double, 4>;
 enum class Channel { Position, Rotation, Scale };
-struct Binding { std::string id; };
-struct Key { std::string id; double time = 0; Value value{}; };
+struct Binding { std::string id; std::string entityName; bool operator==(const Binding&) const = default; };
+struct Key { std::string id; double time = 0; Value value{}; bool operator==(const Key&) const = default; };
 struct TransformTrack {
     std::string id, binding;
     Channel channel = Channel::Position;
     std::vector<Key> keys;
+    bool operator==(const TransformTrack&) const = default;
 };
 struct AnimationSection {
     std::string id, source;
     double start = 0, end = 0, sourceOffset = 0, speed = 1, sourceDuration = 0;
+    bool operator==(const AnimationSection&) const = default;
 };
-struct AnimationTrack { std::string id, binding; std::vector<AnimationSection> sections; };
-struct Event { std::string id; double time = 0; std::string name, payload; };
-struct EventTrack { std::string id; std::vector<Event> events; };
+struct AnimationTrack { std::string id, binding; std::vector<AnimationSection> sections; bool operator==(const AnimationTrack&) const = default; };
+struct Event { std::string id; double time = 0; std::string name, payload; bool operator==(const Event&) const = default; };
+struct EventTrack { std::string id; std::vector<Event> events; bool operator==(const EventTrack&) const = default; };
 struct Sequence {
     std::string id;
     double duration = 1, displayFps = 30;
@@ -30,6 +32,10 @@ struct Sequence {
     std::vector<TransformTrack> transforms;
     std::vector<AnimationTrack> animations;
     std::vector<EventTrack> eventTracks;
+    // Optional schema 2 authoring locator, relative to the project's Assets root.
+    // Exact unique entity names are not persistent GUIDs; rename requires rebinding.
+    std::string scenePath;
+    bool operator==(const Sequence&) const = default;
 };
 struct TransformSample { std::string binding; Channel channel; Value value; };
 struct AnimationSample { std::string binding, section, source; double sourceTime = 0; };

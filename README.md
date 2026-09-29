@@ -2,10 +2,10 @@
 
 场景序列编排模块，独立于骨骼动画求值与编辑器产品层。
 
-**当前状态：S1 / S2 / S3 已实现，2026-09-29。** 独立 owned 快照求值、Once 播放器、
+**当前状态：S1–S4 已实现，2026-09-29。** 独立 owned 快照求值、Once 播放器、
 Transform/动画源时间/事件轨道、严格 JSON 和原子 loose `.ayseq` 保存加载；
 单场景 Transform 绑定、独占控制与基态恢复、可选 Host 单一 tick 集成。
-实际骨骼片段采样、姿势 lease/恢复与安全事件派发；编辑器页面及发布仍未交付，
+实际骨骼片段采样、姿势 lease/恢复与安全事件派发；独立作者核心/Editor 页面已接入，发布仍未交付，
 无默认 Host 装配。
 
 模块边界和播放契约见 [design.md](design.md)；连续实施顺序、优先级与验收见
@@ -37,8 +37,7 @@ cmake --build out/build/sequence-bootstrap
 运行时核心不依赖 AYEditor、AYUI、AYScene、AYRenderer、AYAudio 或 AYAnimation。
 World/动画/音频/相机桥接由独立可选 integration targets 承担；UI-free 作者核心
 通过 AYEditor 薄适配接入，复用已有公共作者控件。Entity integration 已实现；
-骨骼 Animation integration 也已实现；音频/相机 integration 和作者核心/Editor
-targets 尚未创建。
+骨骼 Animation integration、作者核心和 Editor extension 已实现；音频/相机 integration 尚未创建。
 
 ## S1 使用
 
@@ -150,3 +149,16 @@ SDK doctor：52 capabilities、47 modules，0 errors、0 warnings。
   未开启 Animation、Audio、Device、Renderer 或 Editor，验证占位目标不强拉这些依赖。
 - Agent SDK doctor：51 capabilities、47 modules，0 errors、0 warnings。
 - 这些仅是初始化/构建检查，不是序列功能用例或完整引擎回归。
+
+## S4 编辑
+
+开启 `AY_ENABLE_SEQUENCE` 及 AssetIO/Entity/Animation integration 后构建 AYEditor。
+File → New Scene Sequence 创建 Assets/sequences 下的 `.ayseq`，Content Browser 双击打开。
+填写 Assets 相对 `.ayscene` 路径，增加 binding 并指定唯一实体名称；选中 binding 后
+增加 Position/Rotation/Scale 轨道或动画片段。事件轨道不绑定对象。
+DopeSheet 拖动关键帧时间，右侧数值字段编辑分量/事件；section block 中部移动，
+两端裁剪，也可数值修改 source offset/speed/duration。重叠/越界原子拒绝。
+一次拖动一条撤销，取消恢复，Save 原子保存；重开保持全部 ID。独立场景的对象/
+骨骼预览不触发脚本，不污染作者场景；只能读取已保存场景，不是完整蒙皮模型视口。
+未设置 scenePath 时允许纯数值播放。设置定位后写 schema 2，旧 schema 1 可读。
+`AYSequence::EditorCore` 只链接 Core，不依赖 UI/World，历史由宿主提供。

@@ -1,6 +1,6 @@
 # AYSequence 设计
 
-Version: 0.1.0 · 2026-09-29 · Status: S1 / S2 / S3 implemented; S4–S5 planned
+Version: 0.1.0 · 2026-09-29 · Status: S1–S4 implemented; S5 planned
 
 ## 1. 定位与边界
 
@@ -11,11 +11,11 @@ AYAnimation 子系统。第一版不是完整影视 Sequencer，也不支持任�
 | 目标（未实现项标注 Planned） | 职责 | 依赖约束 |
 |---|---|---|
 | AYSequence / AYSequence::Core | 值对象、校验、时间映射、求值、播放器状态、事件穿越 | 标准库与必要数学基础；无 World/UI/设备依赖 |
-| AYSequenceAssetIO | schema 1 严格 loose 读写；Resource 注册/依赖枚举另待后续 | Core、AYIO 与 JSON |
+| AYSequenceAssetIO | schema 1/2 严格 loose 读写；Resource 注册/依赖枚举另待后续 | Core、AYIO 与 JSON |
 | AYSequenceEntityIntegration | 绑定解析、Transform 应用、生命周期/控制权、可选 Host 调度 | Core、AYEntityCore、AYGameLoop；不链接 AYEntity 完整 facade |
 | AYSequenceAnimationIntegration | 既有 Clip 快照、时间采样、骨骼姿势 lease/恢复 | Entity integration、AYEntityAnimationIntegration、AYAnimation、AYResource；无 Renderer |
-| AYSequenceEditorCore (Planned) | 文档数据、原子编辑、验证、预览状态 | Core；无 AYEditor/AYUI |
-| AYEditor sequence extension (Planned) | 文档/历史、内容浏览、轨道界面、隔离场景预览 | 作者核心、可选 integration、公共 AYUI 作者控件 |
+| AYSequenceEditorCore | 不可变快照、原子编辑、验证、稳定 ID | Core；无 AYEditor/AYUI/World/文件/内部历史 |
+| AYEditor sequence extension | 文档/历史、内容浏览、轨道界面、隔离场景预览 | 作者核心、AssetIO、Animation integration、Scene、公共 AYUI 作者控件 |
 
 不要在初始化阶段创建空 SubSystem 或装配默认 Host。实际调度需求在场景集成
 阶段落实到 AYModule/AYGameLoop 的公开边界；依赖方向由构建检查验证。
@@ -59,7 +59,7 @@ S1 已实现资源类型 `authoring.scene-sequence`、后缀 `.ayseq`（Experime
 
 - MVP 单场景；sequence 资产不硬编码 World 指针或可跨 World 复用的运行时实体 ID。
   外部绑定表由宿主注入；S2 使用 World-local Entity ID/handle，不改 Entity 核心。
-  Scene 稳定 GUID/编辑器持久化映射的设计在 S4 决定，不把 uint32 ID 假装成 GUID。
+  S4 使用 Assets 相对 Scene path + 精确唯一实体 name；不是 GUID，改名须重新绑定。
 - 运行时解析到可校验 EntityHandle 并带 World generation；对象删除/场景替换使绑定
   失效，禁止通过旧指针恢复数据。必需绑定缺失时预检拒绝启动并报告诊断。
 - 仅驱动明确登记的通道。第一版对受控对象采用独占控制，不隐式覆盖 physics 或
@@ -86,7 +86,7 @@ Undo/Redo 复用现有 Editor history；原子领域编辑不在公共控件建�
 执行 [根仓最小实现计划](../../AYDocs/SEQUENCE-IMPLEMENTATION-PLAN.md) 的 S1–S5。
 每阶段列出已支持/拒绝项与 AYTest 用例表，通过后提交对应模块与根仓变化；不推送。
 S1 已实现 Core 与独立 `AYSequenceAssetIO`（不是 Resource 集成）；S2 已实现
-`SceneSequenceSession` 与可选 `SequenceRuntimeModule`，尚无编辑器接入。
+`SceneSequenceSession` 与可选 `SequenceRuntimeModule`；S4 已接入独立作者核心及 AYEditor。
 Core 的 Value 数组是序列通道 wire 值，不替代引擎 AYMath 几何类型；场景适配
 负责转换。Scale 范围 [1e-6,1e6]，单位 Quaternion norm² 容差 1e-6；ID 全局唯一。
 schema 1 严格拒绝未知字段/重复 key/不支持版本；JSON 16 MiB、32 层。
@@ -124,6 +124,26 @@ generation 失效，调用者在每个事件回调前检查。S3 增加可选骨
 - dispatchSequenceEvents 按值持有 session/frame/sink；owner/batch/generation 防跨会话、
   重放、过期、嵌套派发。每个回调前预检；stop/seek/rebind/销毁/World teardown 取消
   余下事件。异常捕获后停止，返回已进入回调数；Host tick 只排队，取出后再显式派发。
-- 仍无 `.ayseq` Resource loader、cook/pak、相机/音频、混合/Root Motion、Editor 页面。
+- 仍无 `.ayseq` Resource loader、cook/pak、相机/音频、混合/Root Motion；Editor 页面由 S4 提供。
 - 骨架兼容检查是合法目标拓扑和轨道骨名/类型，不是源骨架 GUID/语义证明；当前
   `.ayanm` 不携带源骨架拓扑。宿主须提供已针对目标骨架制作/烘焙的 Clip。
+
+## 8. S4 已实现契约
+
+- SequenceAuthoring 只依赖 Core，编辑复制候选并验证/编译整份快照；失败、异常、
+  重入保留旧数据，no-op 保留内容版本和快照身份。辅助编辑只能对候选数据使用。
+- AYEditor 文档复用 EditorCommandHistory；拖动期间保存基线，结束只记录起止快照，
+  取消恢复。活动手势禁止 Save/Reload；全部编辑、撤销、保存重开保持稳定 ID。
+- schema 2 必需 scenePath 和 binding.entityName，仍拒绝未知字段；兼容 schema 1。
+  无 locator 写 schema 1，有 locator 写 schema 2。路径相对 Assets，name 精确唯一，
+  最多 256 字节且不含控制符。不是 GUID；重名/缺失/改名拒绝，不猜第一个对象。
+- 页面提供绑定、三类 Transform 轨道、事件、Clip 片段、时间和数值编辑；空的
+  value/animation track 不合法，删最后 item 时删轨道。被引用 binding 删除拒绝。
+- DopeSheet 复用稳定 ID/选择；动画 section 独立 block 视图，中间移动、两端裁剪。
+  左裁剪推进 sourceOffset，移动保持 offset。非法时间/范围/重叠原子拒绝。
+- 预览读取保存的场景到独立 Scene/World，不设置 active World，不运行系统/脚本，
+  不派发 Sequence event/Clip Notify。view 单一推进，关闭/停止/完成恢复。
+  内容修改/Undo/Reload 撤销旧 preview，显式 seek/play 才重新准备；绑定/资源不
+  在逐帧路径重建。根路径 canonical containment 含 symlink 检查，无 cwd 猜测。
+- 对象位置与骨骼预览带 orbit/zoom，不是完整渲染器/蒙皮模型视口，不预览未保存
+  Scene，不提供隐式重定向。无 scenePath 时是纯数值预览。运行时 ID 不持久化。

@@ -16,8 +16,8 @@ bool idValid(const std::string& id) {
     });
 }
 bool timeValid(double t, double end) { return std::isfinite(t) && t >= 0 && t <= end; }
-bool pathValid(const std::string& p) {
-    if (p.empty() || p.size() > 1024 || p.front() == '/' || !p.ends_with(".ayanm")) return false;
+bool pathValid(const std::string& p, const char* suffix = ".ayanm") {
+    if (p.empty() || p.size() > 1024 || p.front() == '/' || !p.ends_with(suffix)) return false;
     if (p.find_first_of("\\:*?\"<>|\0", 0, 9) != std::string::npos) return false;
     for (unsigned char c : p) if (c < 32) return false;
     std::size_t from = 0;
@@ -61,6 +61,7 @@ Value sample(const TransformTrack& track, double time) {
 bool validate(const Sequence& s, Diagnostic* e) {
     if (e) *e = {};
     if (!idValid(s.id)) return fail(e, "id", "Invalid sequence ID");
+    if (!s.scenePath.empty() && !pathValid(s.scenePath, ".ayscene")) return fail(e, "scenePath", "Expected portable relative .ayscene path");
     if (!std::isfinite(s.duration) || s.duration <= 0 || s.duration > 86400) return fail(e, "duration", "Expected 0 < duration <= 86400 seconds");
     if (!std::isfinite(s.displayFps) || s.displayFps < 1 || s.displayFps > 240) return fail(e, "displayFps", "Expected display rate in [1,240]");
     if (s.bindings.size() > 1024 || s.transforms.size() + s.animations.size() + s.eventTracks.size() > 4096) return fail(e, "tracks", "Sequence exceeds binding/track limits");
@@ -68,6 +69,7 @@ bool validate(const Sequence& s, Diagnostic* e) {
     auto addId = [&](const std::string& id) { return idValid(id) && ids.insert(id).second; };
     for (const auto& b : s.bindings) {
         if (!addId(b.id)) return fail(e, b.id, "Invalid/duplicate ID");
+        if (b.entityName.size() > 256 || std::any_of(b.entityName.begin(), b.entityName.end(), [](unsigned char c) { return c < 32; })) return fail(e, b.id, "Invalid entity name locator");
         bindings.insert(b.id);
     }
     std::size_t keyCount = 0, sectionCount = 0, eventCount = 0;

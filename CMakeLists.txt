@@ -7,6 +7,9 @@ target_compile_features(AYSequence PUBLIC cxx_std_23)
 target_include_directories(AYSequence PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
+add_library(AYSequenceEditorCore STATIC src/SequenceAuthoring.cpp)
+add_library(AYSequence::EditorCore ALIAS AYSequenceEditorCore)
+target_link_libraries(AYSequenceEditorCore PUBLIC AYSequence)
 
 option(AY_SEQUENCE_BUILD_ASSET_IO "Build sequence JSON/file support (requires AYIO)" ${AY_BUILD_RUNTIME})
 if(AY_SEQUENCE_BUILD_ASSET_IO)

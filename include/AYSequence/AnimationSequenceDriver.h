@@ -2,8 +2,11 @@
 #include <AYSequence/SceneAnimationDriver.h>
 #include <functional>
 
-namespace ayt::resource { class Animation; class ResourceManager; }
+namespace ayt::resource { class Animation; class ResourceManager; class ISkeleton; }
 namespace ayt::sequence {
+/// Structural preflight shared by driver and authoring preview. Call before
+/// initializing an AnimationPlayer from untrusted skeleton data. Does not sample.
+bool validateAnimationSequenceSkeleton(const ayt::resource::ISkeleton& skeleton, Diagnostic* error = nullptr);
 /// Resolver runs only during bind on the main thread, never during sampling.
 /// The driver validates and copies standard Animation assets into immutable
 /// snapshots; no borrowed mutable Clip, cache, callback or Notify is retained.

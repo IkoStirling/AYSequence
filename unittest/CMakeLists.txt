@@ -1,5 +1,5 @@
-add_executable(AYSequence_UnitTests main.cpp Test_Sequence.cpp)
-target_link_libraries(AYSequence_UnitTests PRIVATE AYSequenceAssetIO AYTest)
+add_executable(AYSequence_UnitTests main.cpp Test_Sequence.cpp Test_SequenceAuthoring.cpp)
+target_link_libraries(AYSequence_UnitTests PRIVATE AYSequenceAssetIO AYSequenceEditorCore AYTest)
 set(_sequence_entity_tests OFF)
 if(TARGET AYSequenceEntityIntegration AND TARGET AYScene)
     target_sources(AYSequence_UnitTests PRIVATE Test_SceneSequence.cpp)
