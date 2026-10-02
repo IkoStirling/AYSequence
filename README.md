@@ -11,13 +11,10 @@ Transform/动画源时间/事件轨道、严格 JSON 和原子 loose `.seq` 保�
 模块边界和播放契约见 [design.md](design.md)；连续实施顺序、优先级与验收见
 [最小实现计划](../../AYDocs/SEQUENCE-IMPLEMENTATION-PLAN.md)。
 
-## 本地仓库与构建
+## 仓库与构建
 
-- 独立仓库位于 `AYRuntime/AYSequence`，初始分支为 `main`，未配置任何 remote。
-- 暂未登记为根仓 submodule/gitlink：没有远端时不写虚假的 `.gitmodules` URL。
-  根仓新克隆不会自动获得此模块；本地仓库须单独备份/搬运。
-- 根工程使用 `AY_ENABLE_SEQUENCE=ON` 显式启用，默认 OFF；启用时必须先有本地
-  模块目录。未来远端由用户指定后，再登记 submodule，不自动创建或推送仓库。
+- 独立仓库位于 `AYRuntime/AYSequence`，使用 `main` 分支，并登记为根仓 submodule。
+- 根工程使用 `AY_ENABLE_SEQUENCE=ON` 显式启用，默认 OFF；启用前需初始化 submodule。
 - `AYSequence` / `AYSequence::Core` 是独立静态核心，无其他引擎 target 依赖。
   `AYSequenceAssetIO` / `AYSequence::AssetIO` 可选，依赖 AYIO/JSON，不是 Resource loader。
   `AYSequenceEntityIntegration` / `AYSequence::EntityIntegration` 可选，依赖
