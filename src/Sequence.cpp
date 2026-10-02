@@ -1,4 +1,5 @@
 #include <AYSequence/Sequence.h>
+#include <AYAssetFormat/AssetFormat.h>
 
 #include <algorithm>
 #include <cmath>
@@ -16,8 +17,9 @@ bool idValid(const std::string& id) {
     });
 }
 bool timeValid(double t, double end) { return std::isfinite(t) && t >= 0 && t <= end; }
-bool pathValid(const std::string& p, const char* suffix = ".ayanm") {
-    if (p.empty() || p.size() > 1024 || p.front() == '/' || !p.ends_with(suffix)) return false;
+bool pathValid(const std::string& p, std::string_view suffix = {}) {
+    if (p.empty() || p.size() > 1024 || p.front() == '/') return false;
+    if (suffix.empty() ? !ayt::asset_format::matchesPath(p, ayt::asset_format::Id::Animation) : !p.ends_with(suffix)) return false;
     if (p.find_first_of("\\:*?\"<>|\0", 0, 9) != std::string::npos) return false;
     for (unsigned char c : p) if (c < 32) return false;
     std::size_t from = 0;
@@ -61,7 +63,13 @@ Value sample(const TransformTrack& track, double time) {
 bool validate(const Sequence& s, Diagnostic* e) {
     if (e) *e = {};
     if (!idValid(s.id)) return fail(e, "id", "Invalid sequence ID");
-    if (!s.scenePath.empty() && !pathValid(s.scenePath, ".ayscene")) return fail(e, "scenePath", "Expected portable relative .ayscene path");
+    if (!s.scenePath.empty()) {
+        const auto matched = ayt::asset_format::matchPath(s.scenePath);
+        if (!matched || matched->descriptor->id != ayt::asset_format::Id::Scene
+            || !pathValid(s.scenePath, matched->suffix)) {
+            return fail(e, "scenePath", "Expected portable relative Scene path");
+        }
+    }
     if (!std::isfinite(s.duration) || s.duration <= 0 || s.duration > 86400) return fail(e, "duration", "Expected 0 < duration <= 86400 seconds");
     if (!std::isfinite(s.displayFps) || s.displayFps < 1 || s.displayFps > 240) return fail(e, "displayFps", "Expected display rate in [1,240]");
     if (s.bindings.size() > 1024 || s.transforms.size() + s.animations.size() + s.eventTracks.size() > 4096) return fail(e, "tracks", "Sequence exceeds binding/track limits");
@@ -99,7 +107,7 @@ bool validate(const Sequence& s, Diagnostic* e) {
         if (tr.sections.empty() || sectionCount > 10000) return fail(e, tr.id, "Empty/excessive sections");
         double previousEnd = 0;
         for (const auto& sec : tr.sections) {
-            if (!addId(sec.id) || !pathValid(sec.source)) return fail(e, sec.id, "Invalid section ID or non-portable .ayanm path");
+            if (!addId(sec.id) || !pathValid(sec.source)) return fail(e, sec.id, "Invalid section ID or non-portable .anm path");
             if (!timeValid(sec.start, s.duration) || !timeValid(sec.end, s.duration) || sec.end <= sec.start || sec.start < previousEnd) return fail(e, sec.id, "Invalid/overlapping section range");
             if (!std::isfinite(sec.speed) || sec.speed <= 0 || sec.speed > 240 || !std::isfinite(sec.sourceDuration) || sec.sourceDuration <= 0 || sec.sourceDuration > 86400 || !timeValid(sec.sourceOffset, sec.sourceDuration)) return fail(e, sec.id, "Invalid source time/speed");
             if ((sec.end - sec.start) * sec.speed > sec.sourceDuration - sec.sourceOffset + 1e-9) return fail(e, sec.id, "Section exceeds declared source duration");

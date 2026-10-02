@@ -3,7 +3,7 @@
 场景序列编排模块，独立于骨骼动画求值与编辑器产品层。
 
 **当前状态：S1–S4 已实现，2026-09-29。** 独立 owned 快照求值、Once 播放器、
-Transform/动画源时间/事件轨道、严格 JSON 和原子 loose `.ayseq` 保存加载；
+Transform/动画源时间/事件轨道、严格 JSON 和原子 loose `.seq` 保存加载（旧 `.ayseq` 可读取）；
 单场景 Transform 绑定、独占控制与基态恢复、可选 Host 单一 tick 集成。
 实际骨骼片段采样、姿势 lease/恢复与安全事件派发；独立作者核心/Editor 页面已接入，发布仍未交付，
 无默认 Host 装配。
@@ -153,8 +153,8 @@ SDK doctor：52 capabilities、47 modules，0 errors、0 warnings。
 ## S4 编辑
 
 开启 `AY_ENABLE_SEQUENCE` 及 AssetIO/Entity/Animation integration 后构建 AYEditor。
-File → New Scene Sequence 创建 Assets/sequences 下的 `.ayseq`，Content Browser 双击打开。
-填写 Assets 相对 `.ayscene` 路径，增加 binding 并指定唯一实体名称；选中 binding 后
+File → New Scene Sequence 创建 Assets/sequences 下的 `.seq`，Content Browser 双击打开。
+填写 Assets 相对 `.scn` 路径（旧 `.ayscene` 仍可读取），增加 binding 并指定唯一实体名称；选中 binding 后
 增加 Position/Rotation/Scale 轨道或动画片段。事件轨道不绑定对象。
 DopeSheet 拖动关键帧时间，右侧数值字段编辑分量/事件；section block 中部移动，
 两端裁剪，也可数值修改 source offset/speed/duration。重叠/越界原子拒绝。

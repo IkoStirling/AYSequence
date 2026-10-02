@@ -34,7 +34,7 @@ AYAnimation 子系统。第一版不是完整影视 Sequencer，也不支持任�
 同一 binding 的同一属性通道不能有重复权威轨道；全部 ID、有限数值、时间范围、
 片段源范围、资源路径与规模上限须在接受数据前校验。无效修改/加载不得改变旧文档。
 
-S1 已实现资源类型 `authoring.scene-sequence`、后缀 `.ayseq`（Experimental），后续
+S1 已实现资源类型 `authoring.scene-sequence`；现行后缀 `.seq`，旧 `.ayseq` 只读兼容，后续
 `runtime.scene-sequence` 仍 Planned。公开 JSON wire schema 1，顶层 type/version
 显式识别；不是 `.ayanm` 的新字段，也不复用已有 `.timeline.json` 工具状态。
 正式 reader/writer、依赖发现及发布准入齐备前，不注册为已支持 Runtime L1。
@@ -124,7 +124,7 @@ generation 失效，调用者在每个事件回调前检查。S3 增加可选骨
 - dispatchSequenceEvents 按值持有 session/frame/sink；owner/batch/generation 防跨会话、
   重放、过期、嵌套派发。每个回调前预检；stop/seek/rebind/销毁/World teardown 取消
   余下事件。异常捕获后停止，返回已进入回调数；Host tick 只排队，取出后再显式派发。
-- 仍无 `.ayseq` Resource loader、cook/pak、相机/音频、混合/Root Motion；Editor 页面由 S4 提供。
+- 仍无 `.seq` Resource loader、cook/pak、相机/音频、混合/Root Motion；Editor 页面由 S4 提供。
 - 骨架兼容检查是合法目标拓扑和轨道骨名/类型，不是源骨架 GUID/语义证明；当前
   `.ayanm` 不携带源骨架拓扑。宿主须提供已针对目标骨架制作/烘焙的 Clip。
 

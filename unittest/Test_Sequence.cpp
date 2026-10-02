@@ -111,7 +111,7 @@ TEST_CASE(invalid_encode_preserves_previous_bytes) {
 }
 TEST_CASE(atomic_save_reload_and_invalid_save_keeps_file) {
     ayt::test::ScratchDirectory scratch("sequence");
-    const auto path = (scratch.path() / "roundtrip.ayseq").string();
+    const auto path = (scratch.path() / "roundtrip.seq").string();
     auto f = fixture(); CHECK_TRUE(saveSequence(path,f)); Sequence loaded; CHECK_TRUE(loadSequence(path,loaded)); CHECK(loaded.id == f.id);
     f.duration = -1; CHECK_FALSE(saveSequence(path,f)); CHECK_TRUE(loadSequence(path,loaded)); CHECK(loaded.duration == 4);
     CHECK_FALSE(saveSequence(path + ".json",fixture())); CHECK_FALSE(loadSequence(path + ".missing",loaded));

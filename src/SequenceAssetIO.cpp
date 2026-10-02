@@ -1,4 +1,5 @@
 #include <AYSequence/SequenceAssetIO.h>
+#include <AYAssetFormat/AssetFormat.h>
 #include <AYIO/File.h>
 #include <nlohmann/json.hpp>
 #include <filesystem>
@@ -17,7 +18,7 @@ void fields(const Json& j, std::initializer_list<const char*> names) {
 }
 void arrayLimit(const Json& j, std::size_t limit) { if (!j.is_array() || j.size() > limit) throw std::runtime_error("Invalid/excessive array"); }
 double number(const Json& j) { if (!j.is_number()) throw std::runtime_error("Expected number"); return j.get<double>(); }
-bool filePath(const std::string& path) { return !path.empty() && path.find('\0') == std::string::npos && std::filesystem::path(path).extension() == ".ayseq"; }
+bool filePath(const std::string& path) { return !path.empty() && path.find('\0') == std::string::npos && ayt::asset_format::matchesPath(path, ayt::asset_format::Id::SceneSequence); }
 }
 bool decodeSequence(std::string_view bytes, Sequence& output, Diagnostic* e) {
     if (bytes.size() > maxBytes) return fail(e, "Sequence file exceeds 16 MiB");
@@ -105,7 +106,7 @@ bool encodeSequence(const Sequence& s, std::string& output, Diagnostic* e) {
     } catch (const std::exception& ex) { return fail(e, ex.what()); }
 }
 bool loadSequence(const std::string& path, Sequence& output, Diagnostic* e) {
-    if (!filePath(path)) return fail(e, "Expected explicit .ayseq file path");
+    if (!filePath(path)) return fail(e, "Expected explicit .seq file path");
     ayt::io::File file(path, ayt::io::File::Mode::BinaryRead);
     const auto size = file.size();
     if (!file.isOpen() || size > maxBytes) return fail(e, "Cannot open file or file too large");
@@ -114,7 +115,7 @@ bool loadSequence(const std::string& path, Sequence& output, Diagnostic* e) {
     return decodeSequence(bytes, output, e);
 }
 bool saveSequence(const std::string& path, const Sequence& s, Diagnostic* e) {
-    if (!filePath(path)) return fail(e, "Expected explicit .ayseq file path");
+    if (!filePath(path) || !ayt::asset_format::isCanonicalPath(path, ayt::asset_format::Id::SceneSequence)) return fail(e, "Expected explicit .seq file path");
     std::string bytes; if (!encodeSequence(s, bytes, e)) return false;
     if (!ayt::io::File::atomicWrite(path, bytes.data(), bytes.size())) return fail(e, "Atomic sequence write failed");
     return true;

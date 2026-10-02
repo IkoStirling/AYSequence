@@ -9,7 +9,7 @@ Sequence authored() {
     s.id = "authoring";
     s.duration = 6;
     s.bindings = {{"actor", "Character"}};
-    s.scenePath = "worlds/test.ayscene";
+    s.scenePath = "worlds/test.scn";
     s.transforms = {{"track",
                      "actor",
                      Channel::Position,
@@ -149,6 +149,11 @@ TEST_CASE(portable_scene_and_entity_locator_limits) {
         return true;
     }));
     CHECK(m.snapshot() == before);
+}
+TEST_CASE(legacy_scene_suffix_remains_readable) {
+    auto scene = authored();
+    scene.scenePath = "worlds/test.ayscene";
+    CHECK_TRUE(validate(scene));
 }
 TEST_CASE(schema_two_roundtrip_preserves_scene_binding_and_rejects_unknown_fields) {
     auto input = authored();
