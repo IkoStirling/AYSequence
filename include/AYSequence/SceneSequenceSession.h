@@ -32,6 +32,7 @@ public:
     SceneSequenceSession& operator=(const SceneSequenceSession&) = delete;
     /// Explicit World-local Entity IDs, resolved now; not persistent GUIDs.
     /// Reject missing/extra bindings; animation tracks require the driver overload.
+    /// Reject physics and both Fixed/binary32 Sim translation authorities.
     /// Failure leaves the prior session binding unchanged.
     bool bind(ayt::entity::World& world, std::shared_ptr<const CompiledSequence> sequence,
               const std::map<std::string, std::uint32_t>& entities, Diagnostic* error = nullptr);

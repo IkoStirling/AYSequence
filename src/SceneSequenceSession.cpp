@@ -5,6 +5,7 @@
 #include <AYEntity/WorldLifecycle.h>
 #include <AYEntity/components/TransformComponent.h>
 #include <AYEntity/components/SimTransformComponent.h>
+#include <AYEntity/components/DetSimTransformComponent.h>
 #include <AYEntity/components/RigidBodyComponent.h>
 #include <algorithm>
 #include <stdexcept>
@@ -35,8 +36,9 @@ Transform* transform(World& w, EntityHandle h) {
 }
 bool conflict(World& w, EntityHandle h) {
     auto* sim = w.getStorage<ayt::entity::SimTransformComponent>();
+    auto* det = w.getStorage<ayt::entity::DetSimTransformComponent>();
     auto* body = w.getStorage<ayt::entity::RigidBodyComponent>();
-    return !w.findEntity(h.id) || (sim && sim->has(h.id)) || (body && body->has(h.id));
+    return !w.findEntity(h.id) || (sim && sim->has(h.id)) || (det && det->has(h.id)) || (body && body->has(h.id));
 }
 }
 struct SceneSequenceSession::Impl {

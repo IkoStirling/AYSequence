@@ -63,7 +63,8 @@ S1 已实现资源类型 `authoring.scene-sequence`；现行后缀 `.seq`，旧 
 - 运行时解析到可校验 EntityHandle 并带 World generation；对象删除/场景替换使绑定
   失效，禁止通过旧指针恢复数据。必需绑定缺失时预检拒绝启动并报告诊断。
 - 仅驱动明确登记的通道。第一版对受控对象采用独占控制，不隐式覆盖 physics 或
-  确定性 SimTransform 权威；存在冲突时拒绝/要求宿主显式让出控制。
+  确定性 SimTransform 权威（包括独立的 binary32 `DetSimTransformComponent`）；
+  存在冲突时拒绝/要求宿主显式让出控制，播放中新增权威同样撤销 session。
 - 播放开始前取得通道 ownership token 并捕获基态。默认 stop/完成/取消恢复基态，
   pause 保持当前值；释放后交还原控制器。不在每次 seek 重拍基态。
 - 恢复只作用于同 generation 且仍持有的通道，不能覆盖对象销毁或所有权转移后的

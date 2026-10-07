@@ -98,6 +98,7 @@ TEST_CASE(missing_alias_animation_and_controller_bindings_are_rejected) {
     Fixture f; SceneSequenceSession s; Diagnostic e; auto ids=f.ids(); ids["left"]=9999; CHECK_FALSE(s.bind(f.scene.world(),CompiledSequence::compile(model()),ids,&e));
     ids=f.ids(); ids["right"]=ids["left"]; CHECK_FALSE(s.bind(f.scene.world(),CompiledSequence::compile(model()),ids));
     f.left->addComponent<SimTransformComponent>(); CHECK_FALSE(s.bind(f.scene.world(),CompiledSequence::compile(model()),f.ids())); f.left->removeComponent<SimTransformComponent>();
+    f.left->addComponent<DetSimTransformComponent>(); CHECK_FALSE(s.bind(f.scene.world(),CompiledSequence::compile(model()),f.ids())); f.left->removeComponent<DetSimTransformComponent>();
     f.right->addComponent<RigidBodyComponent>(); CHECK_FALSE(s.bind(f.scene.world(),CompiledSequence::compile(model()),f.ids())); f.right->removeComponent<RigidBodyComponent>();
     auto data=model(); data.animations={{"anim","left",{{"clip","clip.ayanm",0,4,0,1,4}}}}; CHECK_FALSE(s.bind(f.scene.world(),CompiledSequence::compile(data),f.ids()));
 }
@@ -157,6 +158,16 @@ TEST_CASE(duplicate_claim_failure_never_partially_acquires_other_targets) {
     auto a=std::make_shared<SceneSequenceSession>(); CHECK_TRUE(a->bind(f.scene.world(),CompiledSequence::compile(single),{{"left",f.left->getId()}})); a->play(); auto b=f.session(); CHECK_FALSE(b->play());
     single.id="other"; single.bindings={{"right"}}; single.transforms[0].binding="right"; single.transforms[0].id="other-track";
     SceneSequenceSession c; CHECK_TRUE(c.bind(f.scene.world(),CompiledSequence::compile(single),{{"right",f.right->getId()}})); CHECK_TRUE(c.play()); c.stop(); CHECK(f.right->getComponent<Transform>()->scale.x==5);
+}
+TEST_CASE(new_binary32_authority_revokes_sequence_without_overwriting_it) {
+    Fixture f; auto s=f.session(); CHECK_TRUE(s->play());
+    auto* det=f.left->addComponent<DetSimTransformComponent>();
+    CHECK_NOT_NULL(det); CHECK_TRUE(det->setPosition(ayt::math::DetVec3::fromInts(2,3,4)));
+    SceneFrame out; CHECK_FALSE(s->advance(1,out));
+    CHECK(s->state()==PlaybackState::Stopped);
+    CHECK(f.left->getComponent<Transform>()->position.x==0);
+    CHECK(det->position == ayt::math::DetVec3::fromInts(2,3,4));
+    CHECK(f.right->getComponent<Transform>()->scale.x==5);
 }
 TEST_CASE(event_dispatch_is_owned_once_and_rejects_foreign_batches) {
     Fixture f; auto a=f.session(); auto b=f.session(); a->play(); SceneFrame frame; a->advance(4,frame);

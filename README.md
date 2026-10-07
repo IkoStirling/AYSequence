@@ -65,7 +65,8 @@ if (session->bind(world, compiled,
 
 ID 只在当前 World 解析，不持久化、不冒充 GUID。对象删除、组件替换、清场及
 World teardown 安全撤销绑定；重新使用需显式 bind。第一版独占整个 Transform，
-拒绝 physics/SimTransform，其他 gameplay writer 须宿主显式让出控制。所有权检测
+拒绝 physics、Q16.16 `SimTransformComponent` 和 binary32 `DetSimTransformComponent`，
+包括播放后动态添加的新权威；其他 gameplay writer 须宿主显式让出控制。所有权检测
 不是 setter 锁；外部写入后不会用旧基态覆盖新值。无 animation driver 的 bind
 仍拒绝动画轨道；S3 使用下面的可选适配。
 
