@@ -148,3 +148,9 @@ generation 失效，调用者在每个事件回调前检查。S3 增加可选骨
   在逐帧路径重建。根路径 canonical containment 含 symlink 检查，无 cwd 猜测。
 - 对象位置与骨骼预览带 orbit/zoom，不是完整渲染器/蒙皮模型视口，不预览未保存
   Scene，不提供隐式重定向。无 scenePath 时是纯数值预览。运行时 ID 不持久化。
+
+## Extended diagnostic observations (2026-10-15)
+
+SceneSequenceSession::debugSnapshots enumerates only the requested World on its owner thread (64 sessions/256 bindings each) and copies playback, Transform ownership and active section observations. Optional independent event history defaults off and caps128/session; it records actual crossed events, then marks delivery after successful gameplay callbacks. Observation never advances playback or drains/replays SceneFrame. Clear and disabling only remove diagnostic events; the original sink, generation and once-only batch rules remain authoritative.
+
+Regression sources are included. Runtime tests and interactive editor acceptance are deferred for this content task; untested changes remain uncommitted.

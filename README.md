@@ -160,3 +160,9 @@ DopeSheet 拖动关键帧时间，右侧数值字段编辑分量/事件；sectio
 骨骼预览不触发脚本，不污染作者场景；只能读取已保存场景，不是完整蒙皮模型视口。
 未设置 scenePath 时允许纯数值播放。设置定位后写 schema 2，旧 schema 1 可读。
 `AYSequence::EditorCore` 只链接 Core，不依赖 UI/World，历史由宿主提供。
+
+## Extended diagnostic observations (2026-10-15)
+
+SceneSequenceSession::debugSnapshots enumerates only the requested World on its owner thread (64 sessions/256 bindings each) and copies playback, Transform ownership and active section observations. Optional independent event history defaults off and caps128/session; it records actual crossed events, then marks delivery after successful gameplay callbacks. Observation never advances playback or drains/replays SceneFrame. Clear and disabling only remove diagnostic events; the original sink, generation and once-only batch rules remain authoritative.
+
+Regression sources are included. Runtime tests and interactive editor acceptance are deferred for this content task; untested changes remain uncommitted.

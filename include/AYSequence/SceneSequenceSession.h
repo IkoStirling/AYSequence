@@ -26,6 +26,14 @@ bool dispatchSequenceEvents(std::shared_ptr<SceneSequenceSession> session, Scene
 /// Exact field/revision checks detect external writes, not intercept setters.
 class SceneSequenceSession final {
 public:
+    struct DebugBinding {std::string name;std::uint32_t entityId=0;bool ownsTransform=false;std::vector<std::string> activeSections;};
+    struct DebugEvent {Event event;std::uint64_t batch=0,generation=0;bool delivered=false;};
+    struct DebugSnapshot {std::uint64_t session=0;std::string sequence,error;double position=0,duration=0;PlaybackState state=PlaybackState::Stopped;std::vector<DebugBinding> bindings;std::vector<DebugEvent> events;};
+    /// Owner-thread bounded observations of all manual/hosted sessions in this World. Never advance or drain frames.
+    static std::vector<DebugSnapshot> debugSnapshots(const ayt::entity::World& world);
+    /// Optional independent event observations,128 per session; defaults off.
+    static void setDebugCaptureEnabled(bool enabled) noexcept;
+    static void clearDebugHistory() noexcept;
     SceneSequenceSession();
     ~SceneSequenceSession();
     SceneSequenceSession(const SceneSequenceSession&) = delete;
