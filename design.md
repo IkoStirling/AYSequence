@@ -16,6 +16,9 @@ Smooth反解进度为节目时间，Step只检查保持位置和下一键，不�
 写入通过AYIO原子替换，失败保留旧输出；JSON浮点允许正常舍入，整数/枚举不得有损转换。
 Renderer桥接是可选target，Core可独立构建。Studio独立于AYEditor；外部时钟可跟随音频播放头，
 仍无内置音频传输、DMX发送和自动发布。
+Studio在1080p默认24积分步、12条体积光和最多10000个可见点；D3D11/D3D12支持时
+点阵走Renderer GPU实例化，--point-cpu强制回退对照。隐藏验收区分CPU墙钟与
+Renderer提供的GPU帧计时，不能把某一后端/设备测值推广为跨平台保证。
 完整契约见[项目文档](../../AYDocs/LIGHTING-SHOW-SYSTEM.md)。
 
 Version: 0.1.0 · 2026-09-29 · Status: S1–S4 implemented; S5 planned

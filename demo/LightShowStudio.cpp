@@ -184,7 +184,7 @@ int main(int argc,char** argv) {
     uint32_t windowWidth=1280,windowHeight=800;
     uint32_t surfaceBudget=64,volumeBudget=32,shadowBudget=4;
     uint32_t pointBudget=65536;
-    bool stepsExplicit=false,volumeExplicit=false,pointExplicit=false;
+    bool stepsExplicit=false,volumeExplicit=false,pointExplicit=false,pointCpu=false;
     render::PerformanceLightBudget lightBudget{64,32,4};
     bool patterns=false;std::string capture,preset,sceneMode="occluders";
     render::Backend backend=render::Backend::Direct3D11;Studio s;
@@ -201,6 +201,7 @@ int main(int argc,char** argv) {
         else if(arg=="--volume-lights"&&i+1<argc){volumeBudget=std::stoul(argv[++i]);volumeExplicit=true;}
         else if(arg=="--shadow-lights"&&i+1<argc)shadowBudget=std::stoul(argv[++i]);
         else if(arg=="--point-budget"&&i+1<argc){pointBudget=std::stoul(argv[++i]);pointExplicit=true;}
+        else if(arg=="--point-cpu")pointCpu=true;
         else if(arg=="--min-separation"&&i+1<argc)s.minimumSeparation=std::stof(argv[++i]);
         else if(arg=="--patterns")patterns=true;
         else if(arg=="--preset"&&i+1<argc)preset=argv[++i];
@@ -223,7 +224,7 @@ int main(int argc,char** argv) {
     if(windowWidth>=1600){
         if(!stepsExplicit)steps=24;
         if(!volumeExplicit)volumeBudget=12;
-        if(!pointExplicit)pointBudget=1024;
+        if(!pointExplicit)pointBudget=10000;
     }
     if(steps<8||steps>64||windowWidth<1280||windowWidth>8192||windowHeight<480||windowHeight>8192
         ||surfaceBudget>256||volumeBudget>64||shadowBudget>8||pointBudget>65536
@@ -262,7 +263,8 @@ int main(int argc,char** argv) {
     render::VolumetricSettings fog;fog.enabled=true;fog.density=.015f;fog.steps=static_cast<uint8_t>(steps);fog.maxDistance=100;fog.anisotropy=.2f;s.renderer.setVolumetricSettings(fog);
     const auto cube=s.renderer.createTexturedUnitCube();const auto material=s.renderer.createMaterialFromPhoskia(render::kPbrPhoskiaSource,"light_show_stage_pbr");
     s.renderer.setMaterialColor(material,"baseColor",.3f,.32f,.36f,1);s.renderer.setMaterialFloat(material,"roughness",.65f);
-    auto previous=std::chrono::steady_clock::now();std::vector<double> timings;uint32_t rendered=0;
+    auto previous=std::chrono::steady_clock::now();
+    std::vector<double> timings,gpuTimings,presenterTimings,renderTimings;uint32_t rendered=0;
     while(s.running&&(!frames||rendered<frames+8)) {
         MSG message;while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}
         if(!s.running)break;
@@ -277,14 +279,23 @@ int main(int argc,char** argv) {
         render::RenderScene scene;
         if(sceneMode!="air")scene.add(cube,material,math::translate(0.f,-.2f,0.f)*math::scale(24.f,.4f,24.f));
         if(sceneMode=="occluders")for(int i=0;i<5;++i)scene.add(cube,material,math::translate(float(i*3-6),1.5f,0)*math::scale(1.f,3.f,1.f));
-        if(!s.presenter.append(s.renderer,scene,s.frame,view,projection,s.width,viewHeight,lightBudget,{.75f,true,pointBudget},&s.error)){
+        const auto presenterBegin=std::chrono::steady_clock::now();
+        if(!s.presenter.append(s.renderer,scene,s.frame,view,projection,s.width,viewHeight,
+            lightBudget,{.75f,true,pointBudget,!pointCpu},&s.error)){
             std::fprintf(stderr,"%s\n",s.error.c_str());s.running=false;
         }
+        const auto presenterEnd=std::chrono::steady_clock::now();
         s.renderer.beginFrame({.005f,.006f,.012f,1});s.renderer.render(scene);
         if(!capture.empty()&&rendered==frames)s.renderer.captureScreenshot(capture);
         s.renderer.endFrame();
         const auto elapsed=std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-begin).count();
-        if(rendered>=30&&(!frames||rendered<frames))timings.push_back(elapsed);
+        if(rendered>=30&&(!frames||rendered<frames)){
+            timings.push_back(elapsed);
+            presenterTimings.push_back(std::chrono::duration<double,std::milli>(presenterEnd-presenterBegin).count());
+            renderTimings.push_back(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-presenterEnd).count());
+            const float gpuMs=s.renderer.getFrameStats().gpuFrameTimeMs;
+            if(std::isfinite(gpuMs)&&gpuMs>0)gpuTimings.push_back(gpuMs);
+        }
         if(rendered%15==0&&!s.hidden) {
             const auto stats=s.renderer.performanceLightStats();
             std::wstring title=L"Aliyat Light Show Studio | "+std::to_wstring(s.player.time())+L" s | lights "+std::to_wstring(stats.surfaceDraws)+L" / "+std::to_wstring(stats.sourceLights)+L" | beams "+std::to_wstring(stats.volumeDraws)+L" | points "+std::to_wstring(s.presenter.pointStats().visible);
@@ -295,12 +306,21 @@ int main(int argc,char** argv) {
     }
     if(!timings.empty()) {
         std::sort(timings.begin(),timings.end());double sum=0;for(double t:timings)sum+=t;
+        std::sort(gpuTimings.begin(),gpuTimings.end());double gpuSum=0;for(double t:gpuTimings)gpuSum+=t;
+        double presenterSum=0,renderSum=0;
+        for(double t:presenterTimings)presenterSum+=t;
+        for(double t:renderTimings)renderSum+=t;
+        const double gpuMean=gpuTimings.empty()?0:gpuSum/gpuTimings.size();
+        const double gpuP95=gpuTimings.empty()?0:gpuTimings[size_t((gpuTimings.size()-1)*.95)];
         const auto stats=s.renderer.performanceLightStats();
         const auto pointStats=s.presenter.pointStats();
-        std::printf("{\"samples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u}\n",
-            timings.size(),s.width,s.height-toolbarHeight,sum/timings.size(),timings[size_t((timings.size()-1)*.95)],
+        std::printf("{\"samples\":%zu,\"gpuSamples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"meanGpuMs\":%.4f,\"p95GpuMs\":%.4f,\"meanPresenterMs\":%.4f,\"meanRenderMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u,\"instancedPoints\":%s}\n",
+            timings.size(),gpuTimings.size(),s.width,s.height-toolbarHeight,
+            sum/timings.size(),timings[size_t((timings.size()-1)*.95)],gpuMean,gpuP95,
+            presenterSum/presenterTimings.size(),renderSum/renderTimings.size(),
             stats.surfaceDraws,stats.volumeDraws,stats.volumeBudgetSkipped,
-            pointStats.source,pointStats.visible,pointStats.budgetSkipped);
+            pointStats.source,pointStats.visible,pointStats.budgetSkipped,
+            pointStats.instanced?"true":"false");
     }
     s.renderer.shutdown();s.initialized=false;DestroyWindow(window);return s.error.empty()?0:5;
 }

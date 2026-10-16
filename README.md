@@ -12,7 +12,9 @@ analyzeFormationClearance连续检查稳定ID编队在过渡中的最小间距�
 支持真实渲染预览、时间跳转、灯具关键帧、编队键、调色和保存/撤销。
 角度编辑以度显示，数据为弧度；--steps 8..64控制积分上限，低分辨率默认48，
 无图案光束可按弦长自适应减少采样。
-工作台新增航线间距检查、1080p自动质量预算，以及--point-budget、--volume-lights等手动覆盖。
+工作台提供航线间距检查、1080p自动质量预算，以及--point-budget、--volume-lights等手动覆盖。
+高分辨率默认保留最多10000可见点并优先GPU实例化；--point-cpu用于CPU四边形对照。
+隐藏验收JSON同时报告CPU墙钟、Renderer GPU帧计时、Presenter/渲染耗时及实例化状态。
 --preset single配合--scene air|floor|occluders提供单灯空中/落地/遮挡对照；--patterns显式打开图案示例。
 Core不依赖Renderer/World，演出tick与呈现由调用者显式拥有。
 能力边界、命令和预算见[演出系统](../../AYDocs/LIGHTING-SHOW-SYSTEM.md)；无自动cook/loader。
