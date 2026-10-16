@@ -20,25 +20,29 @@
 #include <filesystem>
 #include <numbers>
 #include <set>
+#include <unordered_map>
 
 using namespace ayt;
 namespace {
-constexpr int toolbarHeight=84;
-enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes };
+constexpr int toolbarHeight=112;
+enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow };
+struct ShowRevision { std::shared_ptr<const sequence::CompiledLightShow> show; std::string path; };
 struct Studio {
     render::Renderer renderer;
     sequence::LightShowPlayer player;
     sequence::LightShowPresenter presenter;
     sequence::LightShowFrame frame;
     std::shared_ptr<const sequence::CompiledLightShow> show;
-    std::deque<std::shared_ptr<const sequence::CompiledLightShow>> undo,redo;
+    std::deque<ShowRevision> undo,redo;
     std::vector<std::vector<size_t>> targetMembers;
     int cameraMode=0;
     HWND window=nullptr,target=nullptr,property=nullptr,value=nullptr,time=nullptr,valueReadout=nullptr;
     bool running=true,initialized=false,hidden=false;
     uint16_t width=1280,height=800;
     std::string path,error;
+    std::unordered_map<std::string,render::TextureHandle> goboTextures;
     float minimumSeparation=.5f;
+    render::VolumetricSettings fog;
     void updateReadout() {
         if(!valueReadout||!value||!property)return;
         const double v=double(SendMessageW(value,TBM_GETPOS,0,0))/1000;
@@ -47,11 +51,12 @@ struct Studio {
             case 0:number=v*2000;break;case 1:number=(v*2-1)*180;suffix=L" deg";break;
             case 2:number=(v*2-1)*1.4*180/std::numbers::pi;suffix=L" deg";break;
             case 3:number=.5+29.5*v;suffix=L" deg";break;case 4:number=v*360;suffix=L" deg";break;
-            case 8:number=std::min(4,int(v*5));break;case 9:number=v*20;suffix=L" Hz";break;
+            case 8:number=std::min(5,int(v*6));break;case 9:number=v*20;suffix=L" Hz";break;
             case 10:number=v*20;break;case 11:number=.1+29.9*v;suffix=L" deg";break;
             case 12:number=v*.25;break;
             case 13:number=v;break;case 14:number=.01+.99*v;break;
             case 15:number=.25+3.75*v;break;
+            case 16:number=4*v;suffix=L" px";break;
         }
         wchar_t text[64];swprintf_s(text,L"%.3g%ls",number,suffix);SetWindowTextW(valueReadout,text);
     }
@@ -68,15 +73,35 @@ struct Studio {
         const auto restored=SendMessageW(target,CB_FINDSTRINGEXACT,WPARAM(-1),reinterpret_cast<LPARAM>(previous.c_str()));
         SendMessageW(target,CB_SETCURSEL,restored>=0?restored:0,0);
     }
-    void install(std::shared_ptr<const sequence::CompiledLightShow> next,bool keepHistory) {
-        if(!next)return;
-        if(keepHistory){undo.push_back(show);redo.clear();while(undo.size()>8)undo.pop_front();}
+    bool prepareGobos(const sequence::CompiledLightShow& next,const std::string& sourcePath) {
+        std::vector<std::pair<uint32_t,render::TextureHandle>> bindings;
+        for(const auto& fixture:next.data().fixtures) {
+            if(std::none_of(fixture.keys.begin(),fixture.keys.end(),[](const auto& key){return key.value.gobo==sequence::ShowGobo::Texture;}))continue;
+            if(sourcePath.empty()){error="Save the .lshow file before choosing a Gobo image";return false;}
+            const auto resolved=(std::filesystem::absolute(std::filesystem::path(sourcePath)).parent_path()
+                /std::filesystem::u8path(fixture.goboTexturePath)).lexically_normal();
+            const auto key=resolved.string();
+            auto found=goboTextures.find(key);
+            if(found==goboTextures.end()) {
+                const auto texture=renderer.createTextureFromFile(key);
+                if(!texture.isValid()){error="Cannot load Gobo image: "+key;return false;}
+                found=goboTextures.emplace(key,texture).first;
+            }
+            bindings.emplace_back(fixture.id,found->second);
+        }
+        presenter.clearGoboTextures();
+        for(const auto& [id,texture]:bindings)presenter.bindGoboTexture(id,texture);
+        error.clear();return true;
+    }
+    bool install(std::shared_ptr<const sequence::CompiledLightShow> next,bool keepHistory,const std::string& sourcePath) {
+        if(!next||!prepareGobos(*next,sourcePath))return false;
+        if(keepHistory){undo.push_back({show,path});redo.clear();while(undo.size()>8)undo.pop_front();}
         const auto t=player.time();const bool playing=player.playing();show=std::move(next);player.bind(show);
-        player.seek(std::min(t,show->data().duration));if(playing)player.play();targets();
+        path=sourcePath;player.seek(std::min(t,show->data().duration));if(playing)player.play();targets();return true;
     }
     void edit(sequence::LightShow data) {
         auto next=sequence::CompiledLightShow::compile(std::move(data),&error);
-        if(next)install(std::move(next),true);
+        if(next)install(std::move(next),true,path);
     }
     void key() {
         if(!show->evaluate(player.time(),frame,false))return;
@@ -94,7 +119,7 @@ struct Studio {
                 case 3:state.outerAngle=(.5f+v*29.5f)*float(std::numbers::pi/180);state.innerAngle=std::min(state.innerAngle,state.outerAngle*.75f);break;
                 case 4:state.goboRotation=v*float(2*std::numbers::pi);break;
                 case 5:state.color[0]=v;break;case 6:state.color[1]=v;break;case 7:state.color[2]=v;break;
-                case 8:state.gobo=static_cast<sequence::ShowGobo>(std::min(4,int(v*5)));break;
+                case 8:state.gobo=static_cast<sequence::ShowGobo>(std::min(5,int(v*6)));break;
                 case 9:track.strobeFrequency=v*20;break;
                 case 10:state.volumetric=v*20;break;
                 case 11:state.innerAngle=(.1f+v*29.9f)*float(std::numbers::pi/180);state.outerAngle=std::max(state.outerAngle,state.innerAngle+.005f);break;
@@ -102,6 +127,7 @@ struct Studio {
                 case 13:state.goboFocus=v;break;
                 case 14:state.iris=.01f+.99f*v;break;
                 case 15:state.goboScale=.25f+3.75f*v;break;
+                case 16:state.shadowSoftness=4*v;break;
             }
             const double time=player.time();
             auto found=std::lower_bound(track.keys.begin(),track.keys.end(),time,[](const auto& k,double t){return k.time<t;});
@@ -134,8 +160,41 @@ struct Studio {
         dialog.Flags=OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|(save?OFN_OVERWRITEPROMPT:OFN_FILEMUSTEXIST);
         if(!(save?GetSaveFileNameW(&dialog):GetOpenFileNameW(&dialog)))return;
         const auto selected=std::filesystem::path(filename).string();
-        if(save){if(sequence::saveLightShow(selected,show->data(),&error))path=selected;}
-        else {sequence::LightShow data;if(sequence::loadLightShow(selected,data,&error)){install(sequence::CompiledLightShow::compile(std::move(data)),true);path=selected;}}
+        if(save){
+            const auto base=std::filesystem::absolute(std::filesystem::path(selected)).parent_path();
+            for(const auto& fixture:show->data().fixtures) {
+                if(std::none_of(fixture.keys.begin(),fixture.keys.end(),[](const auto& key){return key.value.gobo==sequence::ShowGobo::Texture;}))continue;
+                if(!std::filesystem::exists(base/std::filesystem::u8path(fixture.goboTexturePath))) {
+                    error="Copy Gobo images beside the new .lshow location before Save As";
+                    MessageBoxA(window,error.c_str(),"Save light show",MB_OK|MB_ICONWARNING);return;
+                }
+            }
+            if(sequence::saveLightShow(selected,show->data(),&error)&&prepareGobos(*show,selected))path=selected;
+        }
+        else {sequence::LightShow data;if(sequence::loadLightShow(selected,data,&error))install(sequence::CompiledLightShow::compile(std::move(data)),true,selected);}
+    }
+    void loadGobo() {
+        if(path.empty()){MessageBoxW(window,L"Save the .lshow file first.",L"Gobo image",MB_OK|MB_ICONINFORMATION);return;}
+        wchar_t filename[32768]{};
+        OPENFILENAMEW dialog{};dialog.lStructSize=sizeof(dialog);dialog.hwndOwner=window;
+        dialog.lpstrFilter=L"Images (*.png;*.jpg;*.jpeg;*.bmp;*.tga)\0*.png;*.jpg;*.jpeg;*.bmp;*.tga\0\0";
+        dialog.lpstrFile=filename;dialog.nMaxFile=static_cast<DWORD>(std::size(filename));
+        dialog.Flags=OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|OFN_FILEMUSTEXIST;
+        if(!GetOpenFileNameW(&dialog))return;
+        const auto base=std::filesystem::absolute(std::filesystem::path(path)).parent_path();
+        const auto relative=std::filesystem::path(filename).lexically_relative(base);
+        if(relative.empty()||relative.is_absolute()||std::find(relative.begin(),relative.end(),std::filesystem::path(".."))!=relative.end()) {
+            MessageBoxW(window,L"Choose an image inside the .lshow folder or a child folder.",L"Gobo image",MB_OK|MB_ICONWARNING);return;
+        }
+        const auto selected=SendMessageW(target,CB_GETCURSEL,0,0);
+        if(selected<0||size_t(selected)>=targetMembers.size())return;
+        auto data=show->data();
+        for(const auto index:targetMembers[size_t(selected)]) {
+            auto& track=data.fixtures[index];track.goboTexturePath=relative.generic_string();
+            for(auto& key:track.keys)key.value.gobo=sequence::ShowGobo::Texture;
+        }
+        edit(std::move(data));
+        if(!error.empty())MessageBoxA(window,error.c_str(),"Gobo image",MB_OK|MB_ICONWARNING);
     }
     void command(int id) {
         if(id==Property)updateReadout();
@@ -143,6 +202,7 @@ struct Studio {
         if(id==Play){if(player.playing())player.pause();else player.play();}
         if(id==Restart){player.stop();player.play();}
         if(id==Open)file(false);if(id==Save)file(true);if(id==AddKey)key();
+        if(id==LoadGobo)loadGobo();
         if(id==Circle)formation(false);if(id==Sphere)formation(true);
         if(id==CheckRoutes){
             sequence::FormationClearanceReport report;
@@ -160,8 +220,21 @@ struct Studio {
             }
         }
         if(id==Palette){auto data=show->data();for(auto& key:data.formations)for(auto& p:key.points)std::rotate(p.color.begin(),p.color.begin()+1,p.color.end());edit(std::move(data));}
-        if(id==Undo&&!undo.empty()){redo.push_back(show);auto next=undo.back();undo.pop_back();install(std::move(next),false);}
-        if(id==Redo&&!redo.empty()){undo.push_back(show);auto next=redo.back();redo.pop_back();install(std::move(next),false);}
+        if(id==SmokeBox){fog.local=!fog.local;if(initialized)renderer.setVolumetricSettings(fog);}
+        if(id==ToggleShadow){
+            const auto selected=SendMessageW(target,CB_GETCURSEL,0,0);
+            if(selected>=0&&size_t(selected)<targetMembers.size()){
+                auto data=show->data();
+                for(const auto index:targetMembers[size_t(selected)]){
+                    auto& keys=data.fixtures[index].keys;
+                    const bool enabled=!keys.front().value.shadow;
+                    for(auto& key:keys)key.value.shadow=enabled;
+                }
+                edit(std::move(data));
+            }
+        }
+        if(id==Undo&&!undo.empty()){auto next=undo.back(),previous=ShowRevision{show,path};if(install(next.show,false,next.path)){redo.push_back(previous);undo.pop_back();}}
+        if(id==Redo&&!redo.empty()){auto next=redo.back(),previous=ShowRevision{show,path};if(install(next.show,false,next.path)){undo.push_back(previous);redo.pop_back();}}
     }
 };
 HWND control(HWND parent,const wchar_t* type,const wchar_t* title,int id,int x,int y,int w,int h,DWORD style=0) {
@@ -202,6 +275,7 @@ int main(int argc,char** argv) {
         else if(arg=="--shadow-lights"&&i+1<argc)shadowBudget=std::stoul(argv[++i]);
         else if(arg=="--point-budget"&&i+1<argc){pointBudget=std::stoul(argv[++i]);pointExplicit=true;}
         else if(arg=="--point-cpu")pointCpu=true;
+        else if(arg=="--smoke-box"&&i+6<argc){s.fog.local=true;s.fog.center={std::stof(argv[++i]),std::stof(argv[++i]),std::stof(argv[++i])};s.fog.halfExtent={std::stof(argv[++i]),std::stof(argv[++i]),std::stof(argv[++i])};}
         else if(arg=="--min-separation"&&i+1<argc)s.minimumSeparation=std::stof(argv[++i]);
         else if(arg=="--patterns")patterns=true;
         else if(arg=="--preset"&&i+1<argc)preset=argv[++i];
@@ -226,9 +300,13 @@ int main(int argc,char** argv) {
         if(!volumeExplicit)volumeBudget=12;
         if(!pointExplicit)pointBudget=10000;
     }
+    bool smokeValid=true;
+    for(int axis=0;axis<3;++axis)smokeValid &= std::isfinite(s.fog.center[axis])&&std::abs(s.fog.center[axis])<=100000
+        &&std::isfinite(s.fog.halfExtent[axis])&&s.fog.halfExtent[axis]>=.01f&&s.fog.halfExtent[axis]<=10000;
     if(steps<8||steps>64||windowWidth<1280||windowWidth>8192||windowHeight<480||windowHeight>8192
         ||surfaceBudget>256||volumeBudget>64||shadowBudget>8||pointBudget>65536
         ||!std::isfinite(s.minimumSeparation)||s.minimumSeparation<=0
+        ||!smokeValid
         ||(sceneMode!="air"&&sceneMode!="floor"&&sceneMode!="occluders")){
         std::fprintf(stderr,"Invalid viewport, light budget, --steps, --min-separation or --scene\n");return 2;
     }
@@ -248,19 +326,23 @@ int main(int argc,char** argv) {
     s.time=control(window,TRACKBAR_CLASSW,L"",Time,950,4,280,28,TBS_NOTICKS);SendMessageW(s.time,TBM_SETRANGE,TRUE,MAKELPARAM(0,1000));
     s.target=control(window,L"COMBOBOX",L"",Target,8,42,170,350,CBS_DROPDOWNLIST|WS_VSCROLL);
     s.property=control(window,L"COMBOBOX",L"",Property,188,42,170,350,CBS_DROPDOWNLIST);
-    for(const auto* name:{L"Intensity",L"Pan",L"Tilt",L"Field half-angle (deg)",L"Pattern rotation",L"Red",L"Green",L"Blue",L"Pattern",L"Strobe Hz",L"Volume strength",L"Core half-angle (deg)",L"Aperture radius (units)",L"Pattern focus",L"Iris opening",L"Pattern scale"})SendMessageW(s.property,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));
+    for(const auto* name:{L"Intensity",L"Pan",L"Tilt",L"Field half-angle (deg)",L"Pattern rotation",L"Red",L"Green",L"Blue",L"Pattern",L"Strobe Hz",L"Volume strength",L"Core half-angle (deg)",L"Aperture radius (units)",L"Pattern focus",L"Iris opening",L"Pattern scale",L"Shadow softness (px)"})SendMessageW(s.property,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));
     SendMessageW(s.property,CB_SETCURSEL,0,0);s.targets();
     s.value=control(window,TRACKBAR_CLASSW,L"",Value,370,39,230,30,TBS_NOTICKS);SendMessageW(s.value,TBM_SETRANGE,TRUE,MAKELPARAM(0,1000));SendMessageW(s.value,TBM_SETPOS,TRUE,500);
     s.valueReadout=control(window,L"STATIC",L"",0,604,46,76,22);s.updateReadout();
     control(window,L"BUTTON",L"Add / update key",AddKey,680,41,150,27);
     control(window,L"BUTTON",L"Both",ViewBoth,846,41,100,27);control(window,L"BUTTON",L"Stage",ViewStage,954,41,100,27);control(window,L"BUTTON",L"Sky",ViewSky,1062,41,100,27);
     control(window,L"BUTTON",L"Check routes",CheckRoutes,1168,41,112,27);
+    control(window,L"BUTTON",L"Gobo image...",LoadGobo,8,77,130,26);
+    control(window,L"BUTTON",L"Smoke box on/off",SmokeBox,146,77,145,26);
+    control(window,L"BUTTON",L"Shadows on/off",ToggleShadow,299,77,135,26);
     if(!s.hidden)ShowWindow(window,SW_SHOW);
     render::InitDesc init;init.windowHandle=window;init.width=s.width;init.height=s.height;init.vsync=false;init.msaa=0;init.backend=backend;
     if(!s.renderer.initialize(init)){DestroyWindow(window);return 4;}s.initialized=true;
+    if(!s.prepareGobos(*s.show,s.path)){std::fprintf(stderr,"%s\n",s.error.c_str());s.renderer.shutdown();DestroyWindow(window);return 4;}
     s.renderer.configurePipeline(render::RenderPipelineDesc::makeDeferred());s.renderer.setAmbientStrength(.08f);
     s.renderer.setPostProcessBloomStrength(.2f);s.renderer.setPostProcessBloomThreshold(1);s.renderer.setPostProcessExposure(1);
-    render::VolumetricSettings fog;fog.enabled=true;fog.density=.015f;fog.steps=static_cast<uint8_t>(steps);fog.maxDistance=100;fog.anisotropy=.2f;s.renderer.setVolumetricSettings(fog);
+    s.fog.enabled=true;s.fog.density=.015f;s.fog.steps=static_cast<uint8_t>(steps);s.fog.maxDistance=100;s.fog.anisotropy=.2f;s.renderer.setVolumetricSettings(s.fog);
     const auto cube=s.renderer.createTexturedUnitCube();const auto material=s.renderer.createMaterialFromPhoskia(render::kPbrPhoskiaSource,"light_show_stage_pbr");
     s.renderer.setMaterialColor(material,"baseColor",.3f,.32f,.36f,1);s.renderer.setMaterialFloat(material,"roughness",.65f);
     auto previous=std::chrono::steady_clock::now();
@@ -322,5 +404,7 @@ int main(int argc,char** argv) {
             pointStats.source,pointStats.visible,pointStats.budgetSkipped,
             pointStats.instanced?"true":"false");
     }
+    s.presenter.clearGoboTextures();
+    for(auto& [name,texture]:s.goboTextures)s.renderer.destroyTexture(texture);
     s.renderer.shutdown();s.initialized=false;DestroyWindow(window);return s.error.empty()?0:5;
 }

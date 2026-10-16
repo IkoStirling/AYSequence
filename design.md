@@ -11,14 +11,20 @@
 连续间距诊断在每个编队键间对同一进度参数求两条线段的解析最近距离；
 Smooth反解进度为节目时间，Step只检查保持位置和下一键，不把瞬时跳变当飞行路径。
 候选按轨迹包围盒扫描，比较次数和报告数量由调用方限制；不提供避碰规划/飞行安全认证。
-严格schema3/.lshow只作loose作者资源，兼容读取schema1/2并显式补零出光口或
-清晰焦点/全开光阑，不重解释旧文件的角度/功率；旧版本夹带新字段拒绝。
+严格schema4/.lshow只作loose作者资源，兼容读取schema1/2/3并显式补零出光口、
+清晰焦点/全开光阑或空贴图路径，不重解释旧文件的角度/功率；旧版本夹带新字段拒绝。
+Texture Gobo路径属灯具轨道，不随时间插值，必须相对演出文件且不得越出其目录。
+Presenter按稳定灯具ID绑定Renderer纹理，缺少贴图的Texture键在提交前失败。
+schema4同时记录可插值shadowSoftness[0,4]，旧版本按零半径升级，Renderer映射到
+单点阴影atlas的2x2过滤；这不是面积光源模拟。
 写入通过AYIO原子替换，失败保留旧输出；JSON浮点允许正常舍入，整数/枚举不得有损转换。
 Renderer桥接是可选target，Core可独立构建。Studio独立于AYEditor；外部时钟可跟随音频播放头，
 仍无内置音频传输、DMX发送和自动发布。
 Studio在1080p默认24积分步、12条体积光和最多10000个可见点；D3D11/D3D12支持时
 点阵走Renderer GPU实例化，--point-cpu强制回退对照。隐藏验收区分CPU墙钟与
 Renderer提供的GPU帧计时，不能把某一后端/设备测值推广为跨平台保证。
+局部烟雾沿用Renderer的VolumetricSettings.local AABB；Studio可切换默认盒或用
+--smoke-box设定中心和半尺寸，不把全局密度场误当成具体烟机模拟。
 完整契约见[项目文档](../../AYDocs/LIGHTING-SHOW-SYSTEM.md)。
 
 Version: 0.1.0 · 2026-09-29 · Status: S1–S4 implemented; S5 planned

@@ -7,9 +7,9 @@
 
 namespace ayt::sequence {
 using Json=nlohmann::json;
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FixtureState,position,color,pan,tilt,intensity,range,innerAngle,outerAngle,volumetric,goboRotation,goboScale,gobo,shadow,apertureRadius,goboFocus,iris)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FixtureState,position,color,pan,tilt,intensity,range,innerAngle,outerAngle,volumetric,goboRotation,goboScale,gobo,shadow,apertureRadius,goboFocus,iris,shadowSoftness)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FixtureKey,time,value,interpolation)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FixtureTrack,id,group,keys,sweepPan,sweepTilt,sweepFrequency,phase,strobeFrequency,strobeDuty)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FixtureTrack,id,group,goboTexturePath,keys,sweepPan,sweepTilt,sweepFrequency,phase,strobeFrequency,strobeDuty)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ShowPoint,id,position,color,intensity,radius)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FormationKey,time,points,interpolation)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LightShow,name,duration,loop,fixtures,formations)
@@ -17,7 +17,7 @@ namespace {
 constexpr std::size_t maxBytes=128*1024*1024;
 bool fail(std::string* error,const std::string& text){if(error)*error=text;return false;}
 bool pathValid(const std::string& path){return !path.empty()&&path.find('\0')==std::string::npos&&asset_format::isCanonicalPath(path,asset_format::Id::LightShow);}
-Json document(const LightShow& show){return Json{{"type","authoring.light-show"},{"version",3},{"show",show}};}
+Json document(const LightShow& show){return Json{{"type","authoring.light-show"},{"version",4},{"show",show}};}
 bool sameSchema(const Json& input,const Json& canonical) {
     if(canonical.is_number_float())return input.is_number()&&std::isfinite(input.get<double>());
     if(canonical.is_number_integer())return input.is_number_integer()&&input==canonical;
@@ -46,7 +46,7 @@ bool decodeLightShow(std::string_view bytes,LightShow& output,std::string* error
             if(event==Json::parse_event_t::object_end)keys.pop_back();return true;
         });
         if(!json.is_object()||json.size()!=3||json.at("type")!="authoring.light-show"
-            || !json.at("version").is_number_integer() || (json.at("version")!=1&&json.at("version")!=2&&json.at("version")!=3))
+            || !json.at("version").is_number_integer() || (json.at("version")!=1&&json.at("version")!=2&&json.at("version")!=3&&json.at("version")!=4))
             return fail(error,"Unsupported light show schema");
         // Check outer budgets before copying JSON arrays into runtime structures.
         const auto& data=json.at("show");
@@ -73,6 +73,18 @@ bool decodeLightShow(std::string_view bytes,LightShow& output,std::string* error
                 value["iris"]=1.0f;
             }
             json["version"]=3;
+        }
+        if(json.at("version")==3) {
+            for(auto& fixture:json.at("show").at("fixtures"))for(auto& key:fixture.at("keys")) {
+                auto& value=key.at("value");
+                if(value.contains("shadowSoftness"))return fail(error,"Schema3 cannot contain shadowSoftness");
+                value["shadowSoftness"]=0.0f;
+            }
+            for(auto& fixture:json.at("show").at("fixtures")) {
+                if(fixture.contains("goboTexturePath"))return fail(error,"Schema3 cannot contain goboTexturePath");
+                fixture["goboTexturePath"]="";
+            }
+            json["version"]=4;
         }
         auto show=data.get<LightShow>();
         // Shape/value checks reject unknown fields and lossy enum/int/vector

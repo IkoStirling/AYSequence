@@ -166,16 +166,22 @@ TEST_CASE(roundtrip_preserves_lights_formations_patterns_and_absolute_time) {
     bytes.replace(angle,end-angle,"\"innerAngle\": 0.01");CHECK(decodeLightShow(bytes,copy,&error));
     CHECK(std::abs(copy.fixtures[0].keys[0].value.apertureRadius-.035f)<1e-6f);
 }
-TEST_CASE(schema1_and_2_migrate_optics_and_schema3_requires_explicit_fields) {
+TEST_CASE(schema1_through_3_migrate_optics_and_texture_path) {
     std::string bytes,error;CHECK(encodeLightShow(showFixture(),bytes));LightShow output;
-    CHECK(bytes.find("\"version\": 3")!=std::string::npos);
+    CHECK(bytes.find("\"version\": 4")!=std::string::npos);
     const auto removeField=[](std::string& document,const char* field){
         size_t at=0;
         while((at=document.find(field,at))!=std::string::npos){
             const auto end=document.find(',',at);document.erase(at,end+1-at);
         }
     };
-    auto legacy=bytes;legacy.replace(legacy.find("\"version\": 3"),12,"\"version\": 2");
+    auto legacy=bytes;legacy.replace(legacy.find("\"version\": 4"),12,"\"version\": 3");
+    CHECK(!decodeLightShow(legacy,output,&error));
+    removeField(legacy,"\"goboTexturePath\"");removeField(legacy,"\"shadowSoftness\"");
+    CHECK(decodeLightShow(legacy,output,&error));
+    CHECK(output.fixtures[0].goboTexturePath.empty());
+    CHECK(output.fixtures[0].keys[0].value.shadowSoftness==0);
+    legacy.replace(legacy.find("\"version\": 3"),12,"\"version\": 2");
     CHECK(!decodeLightShow(legacy,output,&error)); // v3 optics are not legal in v2.
     removeField(legacy,"\"goboFocus\"");removeField(legacy,"\"iris\"");
     CHECK(decodeLightShow(legacy,output,&error));
@@ -185,9 +191,24 @@ TEST_CASE(schema1_and_2_migrate_optics_and_schema3_requires_explicit_fields) {
     CHECK(!decodeLightShow(legacy,output,&error)); // v2 aperture is not legal in v1.
     removeField(legacy,"\"apertureRadius\"");CHECK(decodeLightShow(legacy,output,&error));
     for(const auto& key:output.fixtures[0].keys)CHECK(key.value.apertureRadius==0);
-    CHECK(encodeLightShow(output,legacy));CHECK(legacy.find("\"version\": 3")!=std::string::npos);
+    CHECK(encodeLightShow(output,legacy));CHECK(legacy.find("\"version\": 4")!=std::string::npos);
     removeField(bytes,"\"apertureRadius\"");CHECK(!decodeLightShow(bytes,output,&error));
     CHECK(output.fixtures[0].keys[0].value.apertureRadius==0); // failed decode preserves output.
+}
+TEST_CASE(texture_gobo_requires_a_relative_fixture_path_and_roundtrips) {
+    auto data=showFixture();auto& track=data.fixtures[0];track.keys[0].value.gobo=ShowGobo::Texture;
+    CHECK(!CompiledLightShow::compile(data));
+    track.goboTexturePath="gobos/star.png";
+    CHECK(CompiledLightShow::compile(data)!=nullptr);
+    std::string bytes,error;CHECK(encodeLightShow(data,bytes,&error));
+    LightShow copy;CHECK(decodeLightShow(bytes,copy,&error));
+    CHECK(copy.fixtures[0].goboTexturePath=="gobos/star.png");
+    CHECK(copy.fixtures[0].keys[0].value.gobo==ShowGobo::Texture);
+    track.goboTexturePath="../escape.png";CHECK(!CompiledLightShow::compile(data));
+    track.goboTexturePath="C:/absolute.png";CHECK(!CompiledLightShow::compile(data));
+    auto missing=bytes;const auto at=missing.find("\"goboTexturePath\"");
+    missing.erase(at,missing.find(',',at)-at+1);
+    CHECK(!decodeLightShow(missing,copy,&error));
 }
 TEST_CASE(rejects_unknown_fields_duplicate_keys_and_lossy_enum_conversions) {
     std::string bytes;CHECK(encodeLightShow(showFixture(),bytes));LightShow output=showFixture();

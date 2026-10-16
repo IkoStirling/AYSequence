@@ -12,7 +12,7 @@ namespace ayt::sequence {
 
 using ShowVec3 = std::array<float, 3>;
 enum class ShowInterpolation : std::uint8_t { Step, Linear, Smooth };
-enum class ShowGobo : std::uint8_t { Open, Stripes, Grid, Ring, Star };
+enum class ShowGobo : std::uint8_t { Open, Stripes, Grid, Ring, Star, Texture };
 
 struct FixtureState {
     ShowVec3 position{0, 5, 0};
@@ -31,6 +31,8 @@ struct FixtureState {
     bool shadow = false;
     /// Exit-aperture radius in world units, [0,1]; zero is a point source.
     float apertureRadius = 0.035f;
+    /// Optional bounded 2x2 shadow filter radius in atlas texels, [0,4].
+    float shadowSoftness = 0;
 };
 struct FixtureKey {
     double time = 0;
@@ -43,6 +45,9 @@ struct FixtureTrack {
     std::vector<FixtureKey> keys;
     float sweepPan = 0, sweepTilt = 0, sweepFrequency = 0, phase = 0;
     float strobeFrequency = 0, strobeDuty = 0.5f;
+    /// Optional UTF-8 texture path relative to the .lshow file. Required by
+    /// Texture keys; the host loads and binds it before presenting frames.
+    std::string goboTexturePath;
 };
 struct ShowPoint {
     std::uint32_t id = 0;

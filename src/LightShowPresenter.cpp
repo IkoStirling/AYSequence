@@ -2,6 +2,10 @@
 #include <AYRenderer.h>
 #include <cmath>
 namespace ayt::sequence {
+void LightShowPresenter::bindGoboTexture(std::uint32_t fixtureId,render::TextureHandle texture) {
+    if(texture.isValid())_goboTextures[fixtureId]=texture;
+    else _goboTextures.erase(fixtureId);
+}
 bool LightShowPresenter::append(render::Renderer& renderer,render::RenderScene& scene,const LightShowFrame& frame,
     const math::Float4x4& view,const math::Float4x4& projection,uint16_t width,uint16_t height,
     render::PerformanceLightBudget lightBudget,render::EmissivePointSettings pointSettings,std::string* error) {
@@ -16,6 +20,16 @@ bool LightShowPresenter::append(render::Renderer& renderer,render::RenderScene& 
         target.apertureRadius=s.apertureRadius;
         target.pattern=static_cast<render::LightPattern>(s.gobo);target.patternRotation=s.goboRotation;target.patternScale=s.goboScale;
         target.patternFocus=s.goboFocus;target.iris=s.iris;
+        target.shadowSoftness=s.shadowSoftness;
+        target.goboTexture={};
+        if(s.gobo==ShowGobo::Texture) {
+            const auto found=_goboTextures.find(source.id);
+            if(found==_goboTextures.end()) {
+                if(error)*error="Texture Gobo is not bound for fixture "+std::to_string(source.id);
+                return false;
+            }
+            target.goboTexture=found->second;
+        }
     }
     _pointData.resize(frame.points.size());
     for(size_t i=0;i<_pointData.size();++i) {

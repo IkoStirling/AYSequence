@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cmath>
 #include <numbers>
+#include <filesystem>
 #include <unordered_set>
 
 namespace ayt::sequence {
@@ -29,6 +30,7 @@ FixtureState mix(const FixtureState& a, const FixtureState& b, float t) {
     out.innerAngle = mix(a.innerAngle,b.innerAngle,t); out.outerAngle = mix(a.outerAngle,b.outerAngle,t);
     out.volumetric = mix(a.volumetric,b.volumetric,t);
     out.apertureRadius = mix(a.apertureRadius,b.apertureRadius,t);
+    out.shadowSoftness = mix(a.shadowSoftness,b.shadowSoftness,t);
     out.goboRotation = mix(a.goboRotation,b.goboRotation,t); out.goboScale = mix(a.goboScale,b.goboScale,t);
     out.goboFocus = mix(a.goboFocus,b.goboFocus,t); out.iris = mix(a.iris,b.iris,t);
     return out;
@@ -46,9 +48,10 @@ bool fixtureValid(const FixtureState& s) {
         && s.innerAngle < s.outerAngle
         && std::cos(s.innerAngle) >= std::cos(s.outerAngle) + .000001f
         && finite(s.volumetric,0,100) && finite(s.apertureRadius,0,1)
+        && finite(s.shadowSoftness,0,4)
         && finite(s.goboRotation,-100000,100000) && finite(s.goboScale,.01f,100)
         && finite(s.goboFocus,0,1) && finite(s.iris,.01f,1)
-        && s.gobo <= ShowGobo::Star;
+        && s.gobo <= ShowGobo::Texture;
 }
 }
 
@@ -66,6 +69,14 @@ std::shared_ptr<const CompiledLightShow> CompiledLightShow::compile(LightShow da
         if (!fixtureIds.insert(track.id).second || track.group.size() > 128
             || track.keys.empty() || track.keys.size() > 65536)
             return fail("Invalid fixture ID/group/key count");
+        if (track.goboTexturePath.size() > 1024 || track.goboTexturePath.find('\0') != std::string::npos)
+            return fail("Invalid Gobo texture path");
+        if (!track.goboTexturePath.empty()) {
+            const std::filesystem::path path(track.goboTexturePath);
+            if (path.is_absolute() || path.has_root_name() || path.has_root_directory()
+                || std::find(path.begin(),path.end(),std::filesystem::path("..")) != path.end())
+                return fail("Gobo texture path must stay relative to the show");
+        }
         samples += track.keys.size();
         if (samples > 1000000) return fail("Show sample budget exceeded");
         if (!finite(track.sweepPan,-100,100) || !finite(track.sweepTilt,-100,100)
@@ -77,6 +88,8 @@ std::shared_ptr<const CompiledLightShow> CompiledLightShow::compile(LightShow da
             if (!std::isfinite(key.time) || key.time < 0 || key.time > data.duration || key.time <= previous
                 || !interpolationValid(key.interpolation) || !fixtureValid(key.value))
                 return fail("Invalid fixture key time/state");
+            if (key.value.gobo == ShowGobo::Texture && track.goboTexturePath.empty())
+                return fail("Texture Gobo requires a fixture texture path");
             previous = key.time;
         }
     }
