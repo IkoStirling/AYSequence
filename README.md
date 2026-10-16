@@ -166,3 +166,11 @@ DopeSheet 拖动关键帧时间，右侧数值字段编辑分量/事件；sectio
 SceneSequenceSession::debugSnapshots enumerates only the requested World on its owner thread (64 sessions/256 bindings each) and copies playback, Transform ownership and active section observations. Optional independent event history defaults off and caps128/session; it records actual crossed events, then marks delivery after successful gameplay callbacks. Observation never advances playback or drains/replays SceneFrame. Clear and disabling only remove diagnostic events; the original sink, generation and once-only batch rules remain authoritative.
 
 Regression sources are included. Runtime tests and interactive editor acceptance are deferred for this content task; untested changes remain uncommitted.
+
+## 2026-10-16 main 合并兼容检查
+
+Spatial 实体的 Transform 为不可移除的固有姿态。序列回归保留“实体删除后
+原子失败、不留下部分写入”的检查，并独立验证被拒绝的 Transform 移除不会
+使绑定失效：播放继续，停止后恢复基态。只调整旧测试假设，未修改运行时逻辑。
+SceneSequenceTests：29/29 用例、179 断言通过。报告：
+out/main-consolidation-20261016/sequence-accepted.json。
