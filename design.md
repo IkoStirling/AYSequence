@@ -1,5 +1,15 @@
 # AYSequence 设计
 
+## 灯光/点阵演出扩展（2026-10-16）
+
+独立LightShow值模型不修改既有Sequence格式/World绑定。Compile校验预算、有限值及编队ID集，
+锥体半角要求cos(inner)>=cos(outer)+1e-6，保证Renderer可接收编译后的灯具，
+并规范ID顺序；绝对时间求值支持键插值/扫动/频闪，作者采样可排除程序化调制。
+播放器显式持有唯一时钟，输出向量复用容量。严格schema1/.lshow只作loose作者资源，
+写入通过AYIO原子替换，失败保留旧输出；JSON浮点允许正常舍入，整数/枚举不得有损转换。
+Renderer桥接是可选target，Core可独立构建。Studio独立于AYEditor，尚无音频/DMX和自动发布。
+完整契约见[项目文档](../../AYDocs/LIGHTING-SHOW-SYSTEM.md)。
+
 Version: 0.1.0 · 2026-09-29 · Status: S1–S4 implemented; S5 planned
 
 ## 1. 定位与边界

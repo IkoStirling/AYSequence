@@ -1,5 +1,14 @@
 # AYSequence
 
+## 灯光与发光点演出（2026-10-16）
+
+LightShow.h提供独立的owned快照、灯具键/扫动/频闪、稳定ID点阵编队和绝对时间播放器。
+LightShowAssetIO.h提供严格schema1的.lshow JSON与AYIO原子保存。
+可选AYSequence::RendererIntegration提供LightShowPresenter；Windows的AYLightShow_Studio
+支持真实渲染预览、时间跳转、灯具关键帧、编队键、调色和保存/撤销。
+Core不依赖Renderer/World，演出tick与呈现由调用者显式拥有。
+能力边界、命令和预算见[演出系统](../../AYDocs/LIGHTING-SHOW-SYSTEM.md)；无自动cook/loader。
+
 场景序列编排模块，独立于骨骼动画求值与编辑器产品层。
 
 **当前状态：S1–S4 已实现，2026-09-29。** 独立 owned 快照求值、Once 播放器、

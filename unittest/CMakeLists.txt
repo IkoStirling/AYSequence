@@ -1,4 +1,4 @@
-add_executable(AYSequence_UnitTests main.cpp Test_Sequence.cpp Test_SequenceAuthoring.cpp)
+add_executable(AYSequence_UnitTests main.cpp Test_Sequence.cpp Test_SequenceAuthoring.cpp Test_LightShow.cpp)
 target_link_libraries(AYSequence_UnitTests PRIVATE AYSequenceAssetIO AYSequenceEditorCore AYTest)
 set(_sequence_entity_tests OFF)
 if(TARGET AYSequenceEntityIntegration AND TARGET AYScene)
@@ -14,4 +14,4 @@ if(TARGET AYSequenceAnimationIntegration AND TARGET AYScene)
 endif()
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/test-features.json" "{\"entity\":\"${_sequence_entity_tests}\",\"animation\":\"${_sequence_animation_tests}\"}\n")
 ay_add_test_tiers(AYSequence_UnitTests PREFIX sequence
-    INTEGRATION_SUITES SequenceAssetTests SceneSequenceTests AnimationSequenceTests STRESS_SUITES SequenceStressTests TIMEOUT 60 RUN_SERIAL)
+    INTEGRATION_SUITES SequenceAssetTests LightShowAssetTests SceneSequenceTests AnimationSequenceTests STRESS_SUITES SequenceStressTests TIMEOUT 60 RUN_SERIAL)
