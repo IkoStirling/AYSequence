@@ -83,10 +83,18 @@ TEST_CASE(external_mutator_and_direct_writes_are_not_overwritten_on_stop) {
     f.left->getComponent<Transform>()->setPosition(99,0,0); CHECK_FALSE(s->advance(1,out)); CHECK(f.left->getComponent<Transform>()->position.x==99); CHECK(f.right->getComponent<Transform>()->scale.x==5); CHECK(s->state()==PlaybackState::Stopped);
     CHECK_TRUE(s->play()); f.left->getComponent<Transform>()->position.x=123; s->stop(); CHECK(f.left->getComponent<Transform>()->position.x==123);
 }
-TEST_CASE(deleted_entity_and_removed_component_fail_without_partial_writes) {
+TEST_CASE(deleted_entity_fails_without_partial_writes) {
     Fixture f; auto s=f.session(); s->play(); SceneFrame out; s->advance(1,out); f.scene.world().destroyEntity(f.left);
     CHECK_FALSE(s->advance(1,out)); CHECK(f.right->getComponent<Transform>()->scale.x==5);
-    Fixture g; auto t=g.session(); t->play(); g.right->removeComponent<Transform>(); CHECK_FALSE(t->advance(1,out)); CHECK(g.left->getComponent<Transform>()->position.x==10);
+}
+TEST_CASE(intrinsic_transform_cannot_be_removed_and_sequence_binding_remains_valid) {
+    Fixture g; auto t=g.session(); CHECK_TRUE(t->play()); SceneFrame out;
+    auto* transform=g.right->getComponent<Transform>();
+    g.right->removeComponent<Transform>();
+    CHECK(g.right->getComponent<Transform>()==transform);
+    CHECK_TRUE(t->advance(1,out));
+    CHECK(g.left->getComponent<Transform>()->position.x==2);
+    t->stop(); CHECK(g.left->getComponent<Transform>()->position.x==10);
 }
 TEST_CASE(world_destruction_and_reinitialize_revoke_old_generation) {
     auto s=std::make_shared<SceneSequenceSession>(); SceneFrame out;
@@ -217,5 +225,18 @@ TEST_CASE(active_world_switch_in_callback_cancels_without_waiting_for_next_host_
     auto frames=host.takeFrames(); std::size_t delivered=0;
     CHECK_FALSE(dispatchSequenceEvents(s,frames[0].frame,[&](const Event&){active=&g.scene.world();},delivered)); CHECK(delivered==1);
     CHECK_FALSE(s->isCurrent(frames[0].frame.generation)); CHECK(g.left->getComponent<Transform>()->position.x==10); CHECK_FALSE(s->play());
+}
+TEST_CASE(debug_event_snapshot_does_not_deliver_or_replay_gameplay_events) {
+    struct Reset {~Reset(){SceneSequenceSession::setDebugCaptureEnabled(false);}} reset;
+    SceneSequenceSession::setDebugCaptureEnabled(true);SceneSequenceSession::clearDebugHistory();
+    Fixture f;auto session=f.session();CHECK_TRUE(session->play());SceneFrame frame;CHECK_TRUE(session->advance(1,frame));
+    const auto pose=f.left->getComponent<Transform>()->position;auto snapshot=SceneSequenceSession::debugSnapshots(f.scene.world());
+    CHECK(snapshot.size()==1);CHECK(frame.playback.events.size()==1);
+    if(!snapshot.empty()){CHECK(snapshot[0].position==1);CHECK(snapshot[0].events.size()==1);if(!snapshot[0].events.empty())CHECK_FALSE(snapshot[0].events[0].delivered);}
+    (void)SceneSequenceSession::debugSnapshots(f.scene.world());CHECK(f.left->getComponent<Transform>()->position.x==pose.x);
+    size_t delivered=0;int callbacks=0;CHECK_TRUE(dispatchSequenceEvents(session,frame,[&](const Event&){++callbacks;},delivered));CHECK(delivered==1);CHECK(callbacks==1);
+    auto after=SceneSequenceSession::debugSnapshots(f.scene.world());if(!after.empty() && !after[0].events.empty())CHECK_TRUE(after[0].events[0].delivered);
+    if(!snapshot.empty() && !snapshot[0].events.empty())CHECK_FALSE(snapshot[0].events[0].delivered);
+    CHECK_FALSE(dispatchSequenceEvents(session,frame,[&](const Event&){++callbacks;},delivered));CHECK(callbacks==1);
 }
 TEST_SUITE_END

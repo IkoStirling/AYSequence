@@ -14,6 +14,7 @@ namespace ayt::sequence {
 namespace {
 using ayt::entity::World; using ayt::entity::EntityHandle; using ayt::entity::Transform;
 struct Registry {
+    bool debugCapture=false;
     std::uint64_t nextSession = 0;
     std::vector<SceneSequenceSession*> sessions;
     std::map<std::pair<World*, std::uint32_t>, SceneSequenceSession*> claims;
@@ -53,6 +54,7 @@ struct SceneSequenceSession::Impl {
     std::unique_ptr<SceneAnimationDriver> animation;
     SequenceSubSystem* host = nullptr;
     Diagnostic error;
+    std::vector<DebugEvent> debugEvents;
 };
 SceneSequenceSession::SceneSequenceSession() : _impl(std::make_unique<Impl>()) {
     auto& r = registry();
@@ -206,6 +208,7 @@ bool SceneSequenceSession::step(double dt, SceneFrame& out, Diagnostic* e) {
 }
 void SceneSequenceSession::stamp(SceneFrame& out) {
     out.generation = _impl->generation; out.owner = _impl->owner; out.batch = ++_impl->batch;
+    if(registry().debugCapture)try{for(const auto& event:out.playback.events){if(_impl->debugEvents.size()==128)_impl->debugEvents.erase(_impl->debugEvents.begin());_impl->debugEvents.push_back({event,out.batch,out.generation,false});}}catch(...){}
 }
 bool dispatchSequenceEvents(std::shared_ptr<SceneSequenceSession> session, SceneFrame frame,
                             SequenceEventSink sink, std::size_t& delivered, Diagnostic* e) {
@@ -230,7 +233,9 @@ bool dispatchSequenceEvents(std::shared_ptr<SceneSequenceSession> session, Scene
             }
         }
         if (!session->isCurrent(frame.generation) || !session->check(e)) return fail("Playback or binding changed; remaining events canceled");
-        try { ++delivered; sink(event); }
+        try { ++delivered; sink(event);
+            for(auto& observed:p.debugEvents)if(observed.batch==frame.batch && observed.generation==frame.generation && observed.event.id==event.id)observed.delivered=true;
+        }
         catch (...) { session->stop(); return fail("Event callback threw; playback stopped"); }
     }
     if (e) *e = {};
@@ -239,6 +244,19 @@ bool dispatchSequenceEvents(std::shared_ptr<SceneSequenceSession> session, Scene
 bool SceneSequenceSession::advance(double dt, SceneFrame& out, Diagnostic* e) {
     if (_impl->host) { if (e) *e = {"tick","Hosted session cannot be manually advanced"}; return false; }
     return step(dt,out,e);
+}
+void SceneSequenceSession::setDebugCaptureEnabled(bool enabled) noexcept {registry().debugCapture=enabled;if(!enabled)clearDebugHistory();}
+void SceneSequenceSession::clearDebugHistory() noexcept {for(auto* session:registry().sessions)session->_impl->debugEvents.clear();}
+std::vector<SceneSequenceSession::DebugSnapshot> SceneSequenceSession::debugSnapshots(const World& world) {
+    std::vector<DebugSnapshot> out;
+    for(const auto* session:registry().sessions){const auto& p=*session->_impl;if(p.world!=&world || !p.player.sequence() || out.size()==64)continue;
+        const auto& data=p.player.sequence()->data();DebugSnapshot row;row.session=p.owner;row.sequence=data.id;row.position=p.player.position();row.duration=data.duration;row.state=p.player.state();row.error=p.error.message;row.events=p.debugEvents;
+        for(const auto& [name,handle]:p.bindings){if(row.bindings.size()==256)break;DebugBinding binding;binding.name=name;binding.entityId=handle.id;
+            binding.ownsTransform=std::any_of(p.held.begin(),p.held.end(),[&](const auto& held){return held.handle==handle;});
+            for(const auto& track:data.animations)if(binding.ownsTransform && track.binding==name)for(const auto& section:track.sections)if(row.position>=section.start && (row.position<section.end || (section.end==data.duration && row.position==data.duration)))binding.activeSections.push_back(section.id+" | "+section.source);
+            row.bindings.push_back(std::move(binding));}
+        out.push_back(std::move(row));}
+    return out;
 }
 double SceneSequenceSession::position() const noexcept { return _impl->player.position(); }
 PlaybackState SceneSequenceSession::state() const noexcept { return _impl->player.state(); }
