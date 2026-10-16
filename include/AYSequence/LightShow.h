@@ -19,12 +19,16 @@ struct FixtureState {
     ShowVec3 color{1, 1, 1};
     float pan = 0, tilt = 0; // radians; zero aims downward, pan rotates around Y.
     float intensity = 30, range = 30;
-    /// Cone half angles in radians; cos(inner) >= cos(outer) + 1e-6.
-    float innerAngle = 0.12f, outerAngle = 0.22f;
+    /// Core and outer field half angles in radians. The region between them
+    /// fades smoothly; each radius = apertureRadius + distance * tan(angle).
+    /// cos(inner) >= cos(outer) + 1e-6. Intensity is not a constant-flux model.
+    float innerAngle = 0.035f, outerAngle = 0.05236f;
     float volumetric = 1;
     float goboRotation = 0, goboScale = 1;
     ShowGobo gobo = ShowGobo::Open;
     bool shadow = false;
+    /// Exit-aperture radius in world units, [0,1]; zero is a point source.
+    float apertureRadius = 0.035f;
 };
 struct FixtureKey {
     double time = 0;

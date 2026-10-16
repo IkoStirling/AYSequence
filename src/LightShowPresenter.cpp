@@ -13,6 +13,7 @@ bool LightShowPresenter::append(render::Renderer& renderer,render::RenderScene& 
         target.light=render::Light::spot({s.position[0],s.position[1],s.position[2]},direction,s.range,s.intensity,
             std::cos(s.innerAngle),std::cos(s.outerAngle),{s.color[0],s.color[1],s.color[2]});
         target.light.castShadow=s.shadow;target.volumetric=s.volumetric;
+        target.apertureRadius=s.apertureRadius;
         target.pattern=static_cast<render::LightPattern>(s.gobo);target.patternRotation=s.goboRotation;target.patternScale=s.goboScale;
     }
     _pointData.resize(frame.points.size());

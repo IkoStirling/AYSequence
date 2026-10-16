@@ -15,6 +15,7 @@
 #include <chrono>
 #include <cmath>
 #include <cstdio>
+#include <cwchar>
 #include <deque>
 #include <filesystem>
 #include <numbers>
@@ -33,10 +34,24 @@ struct Studio {
     std::deque<std::shared_ptr<const sequence::CompiledLightShow>> undo,redo;
     std::vector<std::vector<size_t>> targetMembers;
     int cameraMode=0;
-    HWND window=nullptr,target=nullptr,property=nullptr,value=nullptr,time=nullptr;
+    HWND window=nullptr,target=nullptr,property=nullptr,value=nullptr,time=nullptr,valueReadout=nullptr;
     bool running=true,initialized=false,hidden=false;
     uint16_t width=1280,height=800;
     std::string path,error;
+    void updateReadout() {
+        if(!valueReadout||!value||!property)return;
+        const double v=double(SendMessageW(value,TBM_GETPOS,0,0))/1000;
+        const int selected=int(SendMessageW(property,CB_GETCURSEL,0,0));double number=v;const wchar_t* suffix=L"";
+        switch(selected){
+            case 0:number=v*2000;break;case 1:number=(v*2-1)*180;suffix=L" deg";break;
+            case 2:number=(v*2-1)*1.4*180/std::numbers::pi;suffix=L" deg";break;
+            case 3:number=.5+29.5*v;suffix=L" deg";break;case 4:number=v*360;suffix=L" deg";break;
+            case 8:number=std::min(4,int(v*5));break;case 9:number=v*20;suffix=L" Hz";break;
+            case 10:number=v*20;break;case 11:number=.1+29.9*v;suffix=L" deg";break;
+            case 12:number=v*.25;break;
+        }
+        wchar_t text[64];swprintf_s(text,L"%.3g%ls",number,suffix);SetWindowTextW(valueReadout,text);
+    }
     void targets() {
         const auto selected=SendMessageW(target,CB_GETCURSEL,0,0);std::wstring previous;
         if(selected>=0){const auto length=SendMessageW(target,CB_GETLBTEXTLEN,selected,0);if(length>=0){previous.resize(size_t(length)+1);SendMessageW(target,CB_GETLBTEXT,selected,reinterpret_cast<LPARAM>(previous.data()));previous.resize(size_t(length));}}
@@ -73,12 +88,14 @@ struct Studio {
                 case 0:state.intensity=v*2000;break;
                 case 1:state.pan=(v*2-1)*float(std::numbers::pi);break;
                 case 2:state.tilt=(v*2-1)*1.4f;break;
-                case 3:state.outerAngle=.02f+v;state.innerAngle=std::min(state.innerAngle,state.outerAngle*.75f);break;
+                case 3:state.outerAngle=(.5f+v*29.5f)*float(std::numbers::pi/180);state.innerAngle=std::min(state.innerAngle,state.outerAngle*.75f);break;
                 case 4:state.goboRotation=v*float(2*std::numbers::pi);break;
                 case 5:state.color[0]=v;break;case 6:state.color[1]=v;break;case 7:state.color[2]=v;break;
                 case 8:state.gobo=static_cast<sequence::ShowGobo>(std::min(4,int(v*5)));break;
                 case 9:track.strobeFrequency=v*20;break;
                 case 10:state.volumetric=v*20;break;
+                case 11:state.innerAngle=(.1f+v*29.9f)*float(std::numbers::pi/180);state.outerAngle=std::max(state.outerAngle,state.innerAngle+.005f);break;
+                case 12:state.apertureRadius=v*.25f;break;
             }
             const double time=player.time();
             auto found=std::lower_bound(track.keys.begin(),track.keys.end(),time,[](const auto& k,double t){return k.time<t;});
@@ -115,6 +132,7 @@ struct Studio {
         else {sequence::LightShow data;if(sequence::loadLightShow(selected,data,&error)){install(sequence::CompiledLightShow::compile(std::move(data)),true);path=selected;}}
     }
     void command(int id) {
+        if(id==Property)updateReadout();
         if(id==ViewBoth)cameraMode=0;if(id==ViewStage)cameraMode=1;if(id==ViewSky)cameraMode=2;
         if(id==Play){if(player.playing())player.pause();else player.play();}
         if(id==Restart){player.stop();player.play();}
@@ -136,17 +154,24 @@ LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM w,LPARAM l) {
     if(message==WM_COMMAND){s->command(LOWORD(w));return 0;}
     if(message==WM_SIZE){s->width=static_cast<uint16_t>(std::max(1,int(LOWORD(l))));s->height=static_cast<uint16_t>(std::max(toolbarHeight+1,int(HIWORD(l))));if(s->initialized)s->renderer.resize(s->width,s->height);return 0;}
     if(message==WM_HSCROLL&&reinterpret_cast<HWND>(l)==s->time){s->player.pause();s->player.seek(double(SendMessageW(s->time,TBM_GETPOS,0,0))/1000*s->show->data().duration);return 0;}
+    if(message==WM_HSCROLL&&reinterpret_cast<HWND>(l)==s->value){s->updateReadout();return 0;}
     return DefWindowProcW(window,message,w,l);
 }
 }
 int main(int argc,char** argv) {
-    uint32_t fixtures=32,points=1000,frames=0;double startTime=0;std::string capture;render::Backend backend=render::Backend::Direct3D11;Studio s;
+    uint32_t fixtures=32,points=1000,frames=0,steps=48;double startTime=0;
+    bool patterns=false;std::string capture,preset,sceneMode="occluders";
+    render::Backend backend=render::Backend::Direct3D11;Studio s;
     for(int i=1;i<argc;++i) {
         const std::string arg=argv[i];
         if(arg=="--hidden")s.hidden=true;
         else if(arg=="--frames"&&i+1<argc)frames=std::stoul(argv[++i]);
         else if(arg=="--points"&&i+1<argc)points=std::stoul(argv[++i]);
         else if(arg=="--fixtures"&&i+1<argc)fixtures=std::stoul(argv[++i]);
+        else if(arg=="--steps"&&i+1<argc)steps=std::stoul(argv[++i]);
+        else if(arg=="--patterns")patterns=true;
+        else if(arg=="--preset"&&i+1<argc)preset=argv[++i];
+        else if(arg=="--scene"&&i+1<argc)sceneMode=argv[++i];
         else if(arg=="--time"&&i+1<argc)startTime=std::stod(argv[++i]);
         else if(arg=="--view"&&i+1<argc){const std::string view=argv[++i];s.cameraMode=view=="stage"?1:view=="sky"?2:0;}
         else if(arg=="--capture"&&i+1<argc)capture=argv[++i];
@@ -154,6 +179,17 @@ int main(int argc,char** argv) {
         else s.path=arg;
     }
     sequence::LightShow data=sequence::makeLightShowExample(fixtures,points);
+    if(preset=="single") {
+        s.cameraMode=3;
+        data=sequence::makeLightShowExample(1,0);auto& track=data.fixtures.front();
+        track.sweepPan=track.sweepTilt=0;auto& value=track.keys.front().value;
+        value.position={0,7,0};value.pan=0;value.tilt=.35f;value.color={.25f,.65f,1};
+    }
+    if(patterns)for(size_t i=0;i<data.fixtures.size();++i)
+        for(auto& key:data.fixtures[i].keys)key.value.gobo=static_cast<sequence::ShowGobo>(i%5);
+    if(steps<8||steps>64||(sceneMode!="air"&&sceneMode!="floor"&&sceneMode!="occluders")){
+        std::fprintf(stderr,"Expected --steps 8..64 and --scene air|floor|occluders\n");return 2;
+    }
     if(!s.path.empty()&&!sequence::loadLightShow(s.path,data,&s.error)){std::fprintf(stderr,"%s\n",s.error.c_str());return 1;}
     s.show=sequence::CompiledLightShow::compile(std::move(data),&s.error);if(!s.show)return 2;
     s.player.bind(s.show);if(!s.player.seek(startTime)){std::fprintf(stderr,"Invalid --time\n");return 2;}s.player.play();
@@ -165,17 +201,18 @@ int main(int argc,char** argv) {
     s.time=control(window,TRACKBAR_CLASSW,L"",Time,950,4,280,28,TBS_NOTICKS);SendMessageW(s.time,TBM_SETRANGE,TRUE,MAKELPARAM(0,1000));
     s.target=control(window,L"COMBOBOX",L"",Target,8,42,170,350,CBS_DROPDOWNLIST|WS_VSCROLL);
     s.property=control(window,L"COMBOBOX",L"",Property,188,42,170,350,CBS_DROPDOWNLIST);
-    for(const auto* name:{L"Intensity",L"Pan",L"Tilt",L"Beam angle",L"Pattern rotation",L"Red",L"Green",L"Blue",L"Pattern",L"Strobe Hz",L"Volume strength"})SendMessageW(s.property,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));
+    for(const auto* name:{L"Intensity",L"Pan",L"Tilt",L"Field half-angle (deg)",L"Pattern rotation",L"Red",L"Green",L"Blue",L"Pattern",L"Strobe Hz",L"Volume strength",L"Core half-angle (deg)",L"Aperture radius (units)"})SendMessageW(s.property,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));
     SendMessageW(s.property,CB_SETCURSEL,0,0);s.targets();
-    s.value=control(window,TRACKBAR_CLASSW,L"",Value,370,39,300,30,TBS_NOTICKS);SendMessageW(s.value,TBM_SETRANGE,TRUE,MAKELPARAM(0,1000));SendMessageW(s.value,TBM_SETPOS,TRUE,500);
+    s.value=control(window,TRACKBAR_CLASSW,L"",Value,370,39,230,30,TBS_NOTICKS);SendMessageW(s.value,TBM_SETRANGE,TRUE,MAKELPARAM(0,1000));SendMessageW(s.value,TBM_SETPOS,TRUE,500);
+    s.valueReadout=control(window,L"STATIC",L"",0,604,46,76,22);s.updateReadout();
     control(window,L"BUTTON",L"Add / update key",AddKey,680,41,150,27);
     control(window,L"BUTTON",L"Both",ViewBoth,846,41,100,27);control(window,L"BUTTON",L"Stage",ViewStage,954,41,100,27);control(window,L"BUTTON",L"Sky",ViewSky,1062,41,100,27);
     if(!s.hidden)ShowWindow(window,SW_SHOW);
     render::InitDesc init;init.windowHandle=window;init.width=s.width;init.height=s.height;init.vsync=false;init.msaa=0;init.backend=backend;
     if(!s.renderer.initialize(init)){DestroyWindow(window);return 4;}s.initialized=true;
     s.renderer.configurePipeline(render::RenderPipelineDesc::makeDeferred());s.renderer.setAmbientStrength(.08f);
-    s.renderer.setPostProcessBloomStrength(.3f);s.renderer.setPostProcessBloomThreshold(1);s.renderer.setPostProcessExposure(1.2f);
-    render::VolumetricSettings fog;fog.enabled=true;fog.density=.025f;fog.steps=16;fog.maxDistance=100;fog.anisotropy=.2f;s.renderer.setVolumetricSettings(fog);
+    s.renderer.setPostProcessBloomStrength(.2f);s.renderer.setPostProcessBloomThreshold(1);s.renderer.setPostProcessExposure(1);
+    render::VolumetricSettings fog;fog.enabled=true;fog.density=.015f;fog.steps=static_cast<uint8_t>(steps);fog.maxDistance=100;fog.anisotropy=.2f;s.renderer.setVolumetricSettings(fog);
     const auto cube=s.renderer.createTexturedUnitCube();const auto material=s.renderer.createMaterialFromPhoskia(render::kPbrPhoskiaSource,"light_show_stage_pbr");
     s.renderer.setMaterialColor(material,"baseColor",.3f,.32f,.36f,1);s.renderer.setMaterialFloat(material,"roughness",.65f);
     auto previous=std::chrono::steady_clock::now();std::vector<double> timings;uint32_t rendered=0;
@@ -186,13 +223,13 @@ int main(int argc,char** argv) {
         s.player.advance(frames?1.0/60:std::min(dt,.25));s.player.evaluate(s.frame);
         const uint16_t viewHeight=s.height-toolbarHeight;
         s.renderer.setViewportRect(0,toolbarHeight,s.width,viewHeight);
-        const auto eye=s.cameraMode==1?math::FVector3(16,11,-23):math::FVector3(28,24,-38);
-        const auto aim=s.cameraMode==1?math::FVector3(0,3,0):s.cameraMode==2?math::FVector3(0,18,0):math::FVector3(0,10,0);
+        const auto eye=s.cameraMode==3?math::FVector3(10,6,-13):s.cameraMode==1?math::FVector3(16,11,-23):math::FVector3(28,24,-38);
+        const auto aim=s.cameraMode==3?math::FVector3(0,3,1):s.cameraMode==1?math::FVector3(0,3,0):s.cameraMode==2?math::FVector3(0,18,0):math::FVector3(0,10,0);
         s.renderer.setMainCameraLookAtPerspective(eye,aim,{0,1,0},55,float(s.width)/viewHeight,.1f,150);
         math::Float4x4 view,projection;s.renderer.mainCameraMatrices(view,projection);
         render::RenderScene scene;
-        scene.add(cube,material,math::translate(0.f,-.2f,0.f)*math::scale(24.f,.4f,24.f));
-        for(int i=0;i<5;++i)scene.add(cube,material,math::translate(float(i*3-6),1.5f,0)*math::scale(1.f,3.f,1.f));
+        if(sceneMode!="air")scene.add(cube,material,math::translate(0.f,-.2f,0.f)*math::scale(24.f,.4f,24.f));
+        if(sceneMode=="occluders")for(int i=0;i<5;++i)scene.add(cube,material,math::translate(float(i*3-6),1.5f,0)*math::scale(1.f,3.f,1.f));
         if(!s.presenter.append(s.renderer,scene,s.frame,view,projection,s.width,viewHeight,{64,32,4},{.75f,true,65536},&s.error)){
             std::fprintf(stderr,"%s\n",s.error.c_str());s.running=false;
         }

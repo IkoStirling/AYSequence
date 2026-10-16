@@ -18,6 +18,19 @@ LightShow showFixture() {
 }
 }
 TEST_SUITE(LightShowCoreTests)
+TEST_CASE(aperture_and_two_cone_angles_interpolate_and_reject_invalid_optics) {
+    auto data=showFixture();auto& keys=data.fixtures[0].keys;
+    keys[0].value.apertureRadius=.02f;keys[1].value.apertureRadius=.1f;
+    keys[0].value.innerAngle=.02f;keys[1].value.innerAngle=.04f;
+    keys[0].value.outerAngle=.04f;keys[1].value.outerAngle=.08f;
+    auto show=CompiledLightShow::compile(data);CHECK(show!=nullptr);LightShowFrame frame;
+    CHECK(show->evaluate(2,frame));const auto& value=frame.fixtures[0].value;
+    CHECK(std::abs(value.apertureRadius-.06f)<1e-6f);
+    CHECK(std::abs(value.innerAngle-.03f)<1e-6f);CHECK(std::abs(value.outerAngle-.06f)<1e-6f);
+    keys[0].value.apertureRadius=-1;CHECK(!CompiledLightShow::compile(data));
+    keys[0].value.apertureRadius=std::numeric_limits<float>::quiet_NaN();CHECK(!CompiledLightShow::compile(data));
+    keys[0].value.apertureRadius=1.01f;CHECK(!CompiledLightShow::compile(data));
+}
 TEST_CASE(absolute_time_interpolates_fixture_parameters_and_stable_point_ids) {
     auto show=CompiledLightShow::compile(showFixture()); CHECK(show!=nullptr);
     LightShowFrame frame; CHECK(show->evaluate(2,frame));
@@ -101,7 +114,25 @@ TEST_CASE(roundtrip_preserves_lights_formations_patterns_and_absolute_time) {
     std::string again;CHECK(encodeLightShow(copy,again));CHECK(bytes==again);
     CHECK(copy.fixtures.size()==16);CHECK(copy.formations[1].points.size()==1000);
     const auto angle=bytes.find("\"innerAngle\":");const auto end=bytes.find(',',angle);
-    bytes.replace(angle,end-angle,"\"innerAngle\": 0.1");CHECK(decodeLightShow(bytes,copy,&error));
+    bytes.replace(angle,end-angle,"\"innerAngle\": 0.01");CHECK(decodeLightShow(bytes,copy,&error));
+    CHECK(std::abs(copy.fixtures[0].keys[0].value.apertureRadius-.035f)<1e-6f);
+}
+TEST_CASE(schema1_migrates_to_point_aperture_and_schema2_requires_explicit_radius) {
+    std::string bytes,error;CHECK(encodeLightShow(showFixture(),bytes));LightShow output;
+    CHECK(bytes.find("\"version\": 2")!=std::string::npos);
+    auto legacy=bytes;legacy.replace(legacy.find("\"version\": 2"),12,"\"version\": 1");
+    CHECK(!decodeLightShow(legacy,output,&error)); // v2 field is not legal in v1.
+    const auto removeRadii=[](std::string& document){
+        size_t at=0;
+        while((at=document.find("\"apertureRadius\"",at))!=std::string::npos){
+            const auto end=document.find(',',at);document.erase(at,end+1-at);
+        }
+    };
+    removeRadii(legacy);CHECK(decodeLightShow(legacy,output,&error));
+    for(const auto& key:output.fixtures[0].keys)CHECK(key.value.apertureRadius==0);
+    CHECK(encodeLightShow(output,legacy));CHECK(legacy.find("\"version\": 2")!=std::string::npos);
+    removeRadii(bytes);CHECK(!decodeLightShow(bytes,output,&error));
+    CHECK(output.fixtures[0].keys[0].value.apertureRadius==0); // failed decode preserves output.
 }
 TEST_CASE(rejects_unknown_fields_duplicate_keys_and_lossy_enum_conversions) {
     std::string bytes;CHECK(encodeLightShow(showFixture(),bytes));LightShow output=showFixture();

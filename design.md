@@ -5,7 +5,10 @@
 独立LightShow值模型不修改既有Sequence格式/World绑定。Compile校验预算、有限值及编队ID集，
 锥体半角要求cos(inner)>=cos(outer)+1e-6，保证Renderer可接收编译后的灯具，
 并规范ID顺序；绝对时间求值支持键插值/扫动/频闪，作者采样可排除程序化调制。
-播放器显式持有唯一时钟，输出向量复用容量。严格schema1/.lshow只作loose作者资源，
+有限出光口apertureRadius与两半角共同定义核心/场半径r(z)=apertureRadius+z*tan(angle)。
+半角和出光口线性插值；核心外平滑衰减到场边界，不是恒定总光通或完整镜头光学模型。
+播放器显式持有唯一时钟，输出向量复用容量。严格schema2/.lshow只作loose作者资源，
+兼容读取schema1并显式补零出光口，不重解释旧文件的角度/功率；schema1夹带新字段拒绝。
 写入通过AYIO原子替换，失败保留旧输出；JSON浮点允许正常舍入，整数/枚举不得有损转换。
 Renderer桥接是可选target，Core可独立构建。Studio独立于AYEditor，尚无音频/DMX和自动发布。
 完整契约见[项目文档](../../AYDocs/LIGHTING-SHOW-SYSTEM.md)。

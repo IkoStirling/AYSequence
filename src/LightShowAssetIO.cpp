@@ -7,7 +7,7 @@
 
 namespace ayt::sequence {
 using Json=nlohmann::json;
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FixtureState,position,color,pan,tilt,intensity,range,innerAngle,outerAngle,volumetric,goboRotation,goboScale,gobo,shadow)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FixtureState,position,color,pan,tilt,intensity,range,innerAngle,outerAngle,volumetric,goboRotation,goboScale,gobo,shadow,apertureRadius)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FixtureKey,time,value,interpolation)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FixtureTrack,id,group,keys,sweepPan,sweepTilt,sweepFrequency,phase,strobeFrequency,strobeDuty)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ShowPoint,id,position,color,intensity,radius)
@@ -17,7 +17,7 @@ namespace {
 constexpr std::size_t maxBytes=128*1024*1024;
 bool fail(std::string* error,const std::string& text){if(error)*error=text;return false;}
 bool pathValid(const std::string& path){return !path.empty()&&path.find('\0')==std::string::npos&&asset_format::isCanonicalPath(path,asset_format::Id::LightShow);}
-Json document(const LightShow& show){return Json{{"type","authoring.light-show"},{"version",1},{"show",show}};}
+Json document(const LightShow& show){return Json{{"type","authoring.light-show"},{"version",2},{"show",show}};}
 bool sameSchema(const Json& input,const Json& canonical) {
     if(canonical.is_number_float())return input.is_number()&&std::isfinite(input.get<double>());
     if(canonical.is_number_integer())return input.is_number_integer()&&input==canonical;
@@ -45,7 +45,8 @@ bool decodeLightShow(std::string_view bytes,LightShow& output,std::string* error
                 throw std::runtime_error("Duplicate light show JSON key");
             if(event==Json::parse_event_t::object_end)keys.pop_back();return true;
         });
-        if(!json.is_object()||json.size()!=3||json.at("type")!="authoring.light-show"||json.at("version")!=1)
+        if(!json.is_object()||json.size()!=3||json.at("type")!="authoring.light-show"
+            || !json.at("version").is_number_integer() || (json.at("version")!=1&&json.at("version")!=2))
             return fail(error,"Unsupported light show schema");
         // Check outer budgets before copying JSON arrays into runtime structures.
         const auto& data=json.at("show");
@@ -53,6 +54,16 @@ bool decodeLightShow(std::string_view bytes,LightShow& output,std::string* error
         std::size_t samples=0;
         for(const auto& f:data.at("fixtures")){samples+=f.at("keys").size();if(samples>1000000)return fail(error,"Light show sample budget exceeded");}
         for(const auto& f:data.at("formations")){samples+=f.at("points").size();if(samples>1000000)return fail(error,"Light show sample budget exceeded");}
+        // Bound collections before upgrading. Schema1 has no aperture field;
+        // reject smuggled v2 fields, then retain its original point-source model.
+        if(json.at("version")==1) {
+            for(auto& fixture:json.at("show").at("fixtures"))for(auto& key:fixture.at("keys")) {
+                auto& value=key.at("value");
+                if(value.contains("apertureRadius"))return fail(error,"Schema1 cannot contain apertureRadius");
+                value["apertureRadius"]=0.0f;
+            }
+            json["version"]=2;
+        }
         auto show=data.get<LightShow>();
         // Shape/value checks reject unknown fields and lossy enum/int/vector
         // conversion; ordinary decimal floats may round to their runtime type.

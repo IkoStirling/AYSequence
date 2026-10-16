@@ -28,6 +28,7 @@ FixtureState mix(const FixtureState& a, const FixtureState& b, float t) {
     out.intensity = mix(a.intensity,b.intensity,t); out.range = mix(a.range,b.range,t);
     out.innerAngle = mix(a.innerAngle,b.innerAngle,t); out.outerAngle = mix(a.outerAngle,b.outerAngle,t);
     out.volumetric = mix(a.volumetric,b.volumetric,t);
+    out.apertureRadius = mix(a.apertureRadius,b.apertureRadius,t);
     out.goboRotation = mix(a.goboRotation,b.goboRotation,t); out.goboScale = mix(a.goboScale,b.goboScale,t);
     return out;
 }
@@ -43,7 +44,7 @@ bool fixtureValid(const FixtureState& s) {
         && finite(s.innerAngle,.001f,1.55f) && finite(s.outerAngle,.002f,1.56f)
         && s.innerAngle < s.outerAngle
         && std::cos(s.innerAngle) >= std::cos(s.outerAngle) + .000001f
-        && finite(s.volumetric,0,100)
+        && finite(s.volumetric,0,100) && finite(s.apertureRadius,0,1)
         && finite(s.goboRotation,-100000,100000) && finite(s.goboScale,.01f,100)
         && s.gobo <= ShowGobo::Star;
 }
@@ -157,7 +158,8 @@ LightShow makeLightShowExample(std::uint32_t fixtureCount, std::uint32_t pointCo
         FixtureState state; state.position={8*std::sin(p),7,8*std::cos(p)};
         state.pan = p + static_cast<float>(std::numbers::pi); state.tilt = .5f;
         state.color={.5f+.5f*std::sin(p),.5f+.5f*std::sin(p+2.1f),.5f+.5f*std::sin(p+4.2f)};
-        state.intensity=600; state.volumetric=8; state.shadow=i<4; state.gobo=static_cast<ShowGobo>(i%5);
+        state.intensity=400; state.volumetric=4; state.shadow=i<4;
+        state.gobo=ShowGobo::Open;
         track.sweepPan=.5f; track.sweepTilt=.15f; track.sweepFrequency=.1f; track.phase=p;
         track.keys={{0,state}}; show.fixtures.push_back(std::move(track));
     }
