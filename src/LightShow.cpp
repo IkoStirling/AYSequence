@@ -30,6 +30,7 @@ FixtureState mix(const FixtureState& a, const FixtureState& b, float t) {
     out.volumetric = mix(a.volumetric,b.volumetric,t);
     out.apertureRadius = mix(a.apertureRadius,b.apertureRadius,t);
     out.goboRotation = mix(a.goboRotation,b.goboRotation,t); out.goboScale = mix(a.goboScale,b.goboScale,t);
+    out.goboFocus = mix(a.goboFocus,b.goboFocus,t); out.iris = mix(a.iris,b.iris,t);
     return out;
 }
 template<class Keys> std::size_t lowerKey(const Keys& keys, double time) {
@@ -46,6 +47,7 @@ bool fixtureValid(const FixtureState& s) {
         && std::cos(s.innerAngle) >= std::cos(s.outerAngle) + .000001f
         && finite(s.volumetric,0,100) && finite(s.apertureRadius,0,1)
         && finite(s.goboRotation,-100000,100000) && finite(s.goboScale,.01f,100)
+        && finite(s.goboFocus,0,1) && finite(s.iris,.01f,1)
         && s.gobo <= ShowGobo::Star;
 }
 }
@@ -132,6 +134,83 @@ bool CompiledLightShow::evaluate(double time, LightShowFrame& out, bool procedur
     }
     return true;
 }
+
+bool CompiledLightShow::analyzeFormationClearance(float minimumDistance,
+        std::size_t maxPairChecks, std::size_t maxConflicts,
+        FormationClearanceReport& output) const {
+    if (!std::isfinite(minimumDistance) || minimumDistance <= 0 || !maxPairChecks || !maxConflicts)
+        return false;
+    FormationClearanceReport result;
+    struct Bounds { double minimum, maximum; std::size_t index; };
+    const auto& keys = _data.formations;
+    for (std::size_t keyIndex = 0; keyIndex < keys.size(); ++keyIndex) {
+        const auto& from = keys[keyIndex];
+        const auto& to = keyIndex + 1 < keys.size() && from.interpolation != ShowInterpolation::Step
+            ? keys[keyIndex + 1] : from;
+        const bool moving = &from != &to;
+        std::vector<Bounds> xBounds;
+        xBounds.reserve(from.points.size());
+        for (std::size_t i = 0; i < from.points.size(); ++i) {
+            const double a = from.points[i].position[0], b = to.points[i].position[0];
+            xBounds.push_back({std::min(a,b) - minimumDistance,
+                               std::max(a,b) + minimumDistance, i});
+        }
+        std::sort(xBounds.begin(), xBounds.end(), [](const Bounds& a, const Bounds& b) {
+            return a.minimum < b.minimum || (a.minimum == b.minimum && a.index < b.index);
+        });
+        for (std::size_t i = 0; i < xBounds.size() && result.complete; ++i) {
+            for (std::size_t j = i + 1; j < xBounds.size() &&
+                 xBounds[j].minimum <= xBounds[i].maximum; ++j) {
+                if (result.checkedPairs == maxPairChecks) { result.complete = false; break; }
+                ++result.checkedPairs;
+                const auto ai = xBounds[i].index, bi = xBounds[j].index;
+                const auto& a = from.points[ai].position;
+                const auto& b = from.points[bi].position;
+                const auto& ae = to.points[ai].position;
+                const auto& be = to.points[bi].position;
+                bool disjoint = false;
+                for (int axis = 1; axis < 3; ++axis) {
+                    const double amin = std::min(a[axis],ae[axis]) - minimumDistance;
+                    const double amax = std::max(a[axis],ae[axis]) + minimumDistance;
+                    const double bmin = std::min(b[axis],be[axis]);
+                    const double bmax = std::max(b[axis],be[axis]);
+                    if (amax < bmin || bmax < amin) { disjoint = true; break; }
+                }
+                if (disjoint) continue;
+                double position[3], velocity[3], dot = 0, speed2 = 0;
+                for (int axis = 0; axis < 3; ++axis) {
+                    position[axis] = static_cast<double>(a[axis]) - b[axis];
+                    velocity[axis] = static_cast<double>(ae[axis]) - a[axis] - be[axis] + b[axis];
+                    dot += position[axis] * velocity[axis];
+                    speed2 += velocity[axis] * velocity[axis];
+                }
+                const double fraction = moving && speed2 > 0 ? std::clamp(-dot / speed2, 0.0, 1.0) : 0.0;
+                double distance2 = 0;
+                for (int axis = 0; axis < 3; ++axis)
+                    distance2 += (position[axis] + fraction * velocity[axis]) *
+                                 (position[axis] + fraction * velocity[axis]);
+                if (distance2 >= static_cast<double>(minimumDistance) * minimumDistance) continue;
+                double timeFraction = fraction;
+                if (moving && from.interpolation == ShowInterpolation::Smooth) {
+                    double low = 0, high = 1;
+                    for (int step = 0; step < 48; ++step) {
+                        const double middle = (low + high) * .5;
+                        if (middle * middle * (3 - 2 * middle) < fraction) low = middle;
+                        else high = middle;
+                    }
+                    timeFraction = (low + high) * .5;
+                }
+                result.conflicts.push_back({from.points[ai].id,from.points[bi].id,
+                    from.time + (moving ? timeFraction * (keys[keyIndex + 1].time - from.time) : 0),
+                    static_cast<float>(std::sqrt(distance2))});
+                if (result.conflicts.size() == maxConflicts) { result.complete = false; break; }
+            }
+        }
+        if (!result.complete) break;
+    }
+    output = std::move(result);
+    return true;
+}
 void LightShowPlayer::bind(std::shared_ptr<const CompiledLightShow> show) {
     _show = std::move(show); _time = 0; _playing = false;
 }
@@ -145,6 +224,14 @@ bool LightShowPlayer::advance(double delta) {
     const auto duration = _show->data().duration;
     if (_show->data().loop) _time = std::fmod(_time + std::fmod(delta,duration),duration);
     else { _time = std::min(duration,_time+delta); if (_time == duration) _playing = false; }
+    return true;
+}
+bool LightShowPlayer::synchronize(double elapsedSeconds) {
+    if (!_show || !std::isfinite(elapsedSeconds) || elapsedSeconds < 0) return false;
+    if (!_playing) return true;
+    const auto duration = _show->data().duration;
+    if (_show->data().loop) _time = std::fmod(elapsedSeconds,duration);
+    else { _time = std::min(duration,elapsedSeconds); if (_time == duration) _playing = false; }
     return true;
 }
 bool LightShowPlayer::evaluate(LightShowFrame& out) const { return _show && _show->evaluate(_time,out); }

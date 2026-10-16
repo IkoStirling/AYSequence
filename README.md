@@ -3,12 +3,16 @@
 ## 灯光与发光点演出（2026-10-16）
 
 LightShow.h提供独立的owned快照、灯具键/扫动/频闪、稳定ID点阵编队和绝对时间播放器。
-LightShowAssetIO.h写严格schema2的.lshow JSON，读取schema1时出光口半径置零，AYIO原子保存。
+LightShowAssetIO.h写严格schema3的.lshow JSON，读取schema1时出光口半径置零，
+读取schema1/2时图案焦点清晰且光阑全开，AYIO原子保存。
 灯具支持有限出光口半径、聚光核心半角和外层发散半角；默认窄角、无图案。
+图案柔焦/光阑可关键帧插值。播放器可由外部绝对时钟同步；
+analyzeFormationClearance连续检查稳定ID编队在过渡中的最小间距，输出有界诊断。
 可选AYSequence::RendererIntegration提供LightShowPresenter；Windows的AYLightShow_Studio
 支持真实渲染预览、时间跳转、灯具关键帧、编队键、调色和保存/撤销。
-角度编辑以度显示，数据为弧度；--steps 8..64控制积分上限，默认48，
+角度编辑以度显示，数据为弧度；--steps 8..64控制积分上限，低分辨率默认48，
 无图案光束可按弦长自适应减少采样。
+工作台新增航线间距检查、1080p自动质量预算，以及--point-budget、--volume-lights等手动覆盖。
 --preset single配合--scene air|floor|occluders提供单灯空中/落地/遮挡对照；--patterns显式打开图案示例。
 Core不依赖Renderer/World，演出tick与呈现由调用者显式拥有。
 能力边界、命令和预算见[演出系统](../../AYDocs/LIGHTING-SHOW-SYSTEM.md)；无自动cook/loader。

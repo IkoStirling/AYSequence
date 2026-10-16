@@ -30,6 +30,13 @@ TEST_CASE(aperture_and_two_cone_angles_interpolate_and_reject_invalid_optics) {
     keys[0].value.apertureRadius=-1;CHECK(!CompiledLightShow::compile(data));
     keys[0].value.apertureRadius=std::numeric_limits<float>::quiet_NaN();CHECK(!CompiledLightShow::compile(data));
     keys[0].value.apertureRadius=1.01f;CHECK(!CompiledLightShow::compile(data));
+    keys[0].value.apertureRadius=.02f;keys[0].value.goboFocus=.25f;keys[1].value.goboFocus=.75f;
+    keys[0].value.iris=.2f;keys[1].value.iris=.8f;
+    show=CompiledLightShow::compile(data);CHECK(show!=nullptr);CHECK(show->evaluate(2,frame));
+    CHECK(std::abs(frame.fixtures[0].value.goboFocus-.5f)<1e-6f);
+    CHECK(std::abs(frame.fixtures[0].value.iris-.5f)<1e-6f);
+    keys[0].value.iris=0;CHECK(!CompiledLightShow::compile(data));
+    keys[0].value.iris=.2f;keys[0].value.goboFocus=1.1f;CHECK(!CompiledLightShow::compile(data));
 }
 TEST_CASE(absolute_time_interpolates_fixture_parameters_and_stable_point_ids) {
     auto show=CompiledLightShow::compile(showFixture()); CHECK(show!=nullptr);
@@ -48,6 +55,38 @@ TEST_CASE(point_identity_is_canonical_and_never_interpolates_between_different_i
     CHECK(show->evaluate(2,frame)); CHECK(frame.points[0].id==8); CHECK(frame.points[0].position[0]==80);
     data.formations[1].points[0].id=99; CHECK(!CompiledLightShow::compile(data));
     data=showFixture();data.formations[0].points.push_back(data.formations[0].points[0]); CHECK(!CompiledLightShow::compile(data));
+}
+TEST_CASE(formation_clearance_detects_between_frame_crossings_and_bounds_work) {
+    auto data=showFixture();
+    for(auto& key:data.formations)key.points.clear();
+    ShowPoint a,b;a.id=1;b.id=2;
+    a.position={-2,0,0};b.position={2,0,0};
+    data.formations[0].points={a,b};
+    a.position={2,0,0};b.position={-2,0,0};
+    data.formations[1].points={a,b};
+    auto show=CompiledLightShow::compile(data);CHECK(show!=nullptr);
+    FormationClearanceReport report;
+    CHECK(show->analyzeFormationClearance(.5f,100,10,report));
+    CHECK(report.complete);CHECK(report.conflicts.size()==1);
+    CHECK(report.conflicts[0].firstId==1);CHECK(report.conflicts[0].secondId==2);
+    CHECK(std::abs(report.conflicts[0].time-2)<1e-6);CHECK(report.conflicts[0].distance==0);
+    data.formations[0].interpolation=ShowInterpolation::Smooth;
+    show=CompiledLightShow::compile(data);
+    CHECK(show->analyzeFormationClearance(.5f,100,10,report));
+    CHECK(report.conflicts.size()==1);CHECK(std::abs(report.conflicts[0].time-2)<1e-6);
+    CHECK(show->analyzeFormationClearance(.5f,100,1,report));CHECK(!report.complete);
+    const auto previous=report.checkedPairs;
+    CHECK(!show->analyzeFormationClearance(-1,100,10,report));CHECK(report.checkedPairs==previous);
+    auto bounded=data;
+    ShowPoint c;c.id=3;c.position={0,0,0};
+    for(auto& key:bounded.formations)key.points.push_back(c);
+    auto crowded=CompiledLightShow::compile(bounded);CHECK(crowded!=nullptr);
+    CHECK(crowded->analyzeFormationClearance(.5f,1,10,report));
+    CHECK(!report.complete);CHECK(report.checkedPairs==1);
+    data.formations[0].interpolation=ShowInterpolation::Step;
+    show=CompiledLightShow::compile(data);
+    CHECK(show->analyzeFormationClearance(.5f,100,10,report));
+    CHECK(report.conflicts.empty());
 }
 TEST_CASE(invalid_input_and_evaluation_preserve_existing_state) {
     auto data=showFixture();auto show=CompiledLightShow::compile(data);LightShowFrame frame;
@@ -78,6 +117,16 @@ TEST_CASE(player_pause_seek_loop_and_once_hold_endpoint) {
     CHECK(player.advance(9));CHECK(player.time()==1);CHECK(player.advance(std::numeric_limits<double>::max()));
     CHECK(std::isfinite(player.time()));CHECK(player.time()<4);
     CHECK(!player.advance(-1));player.stop();CHECK(player.time()==0);
+}
+TEST_CASE(external_clock_owns_time_without_accumulated_frame_drift) {
+    auto data=showFixture();data.loop=true;LightShowPlayer player;
+    player.bind(CompiledLightShow::compile(data));player.play();
+    CHECK(player.synchronize(10.25));CHECK(std::abs(player.time()-2.25)<1e-9);
+    CHECK(player.synchronize(10.25));CHECK(std::abs(player.time()-2.25)<1e-9);
+    player.pause();CHECK(player.synchronize(12));CHECK(std::abs(player.time()-2.25)<1e-9);
+    CHECK(!player.synchronize(-1));CHECK(std::abs(player.time()-2.25)<1e-9);
+    data.loop=false;player.bind(CompiledLightShow::compile(data));player.play();
+    CHECK(player.synchronize(8));CHECK(player.time()==4);CHECK(!player.playing());
 }
 TEST_CASE(step_smooth_and_pre_first_key_hold_are_explicit) {
     auto data=showFixture();data.fixtures[0].keys[0].time=1;
@@ -117,21 +166,27 @@ TEST_CASE(roundtrip_preserves_lights_formations_patterns_and_absolute_time) {
     bytes.replace(angle,end-angle,"\"innerAngle\": 0.01");CHECK(decodeLightShow(bytes,copy,&error));
     CHECK(std::abs(copy.fixtures[0].keys[0].value.apertureRadius-.035f)<1e-6f);
 }
-TEST_CASE(schema1_migrates_to_point_aperture_and_schema2_requires_explicit_radius) {
+TEST_CASE(schema1_and_2_migrate_optics_and_schema3_requires_explicit_fields) {
     std::string bytes,error;CHECK(encodeLightShow(showFixture(),bytes));LightShow output;
-    CHECK(bytes.find("\"version\": 2")!=std::string::npos);
-    auto legacy=bytes;legacy.replace(legacy.find("\"version\": 2"),12,"\"version\": 1");
-    CHECK(!decodeLightShow(legacy,output,&error)); // v2 field is not legal in v1.
-    const auto removeRadii=[](std::string& document){
+    CHECK(bytes.find("\"version\": 3")!=std::string::npos);
+    const auto removeField=[](std::string& document,const char* field){
         size_t at=0;
-        while((at=document.find("\"apertureRadius\"",at))!=std::string::npos){
+        while((at=document.find(field,at))!=std::string::npos){
             const auto end=document.find(',',at);document.erase(at,end+1-at);
         }
     };
-    removeRadii(legacy);CHECK(decodeLightShow(legacy,output,&error));
+    auto legacy=bytes;legacy.replace(legacy.find("\"version\": 3"),12,"\"version\": 2");
+    CHECK(!decodeLightShow(legacy,output,&error)); // v3 optics are not legal in v2.
+    removeField(legacy,"\"goboFocus\"");removeField(legacy,"\"iris\"");
+    CHECK(decodeLightShow(legacy,output,&error));
+    CHECK(output.fixtures[0].keys[0].value.goboFocus==0);
+    CHECK(output.fixtures[0].keys[0].value.iris==1);
+    legacy.replace(legacy.find("\"version\": 2"),12,"\"version\": 1");
+    CHECK(!decodeLightShow(legacy,output,&error)); // v2 aperture is not legal in v1.
+    removeField(legacy,"\"apertureRadius\"");CHECK(decodeLightShow(legacy,output,&error));
     for(const auto& key:output.fixtures[0].keys)CHECK(key.value.apertureRadius==0);
-    CHECK(encodeLightShow(output,legacy));CHECK(legacy.find("\"version\": 2")!=std::string::npos);
-    removeRadii(bytes);CHECK(!decodeLightShow(bytes,output,&error));
+    CHECK(encodeLightShow(output,legacy));CHECK(legacy.find("\"version\": 3")!=std::string::npos);
+    removeField(bytes,"\"apertureRadius\"");CHECK(!decodeLightShow(bytes,output,&error));
     CHECK(output.fixtures[0].keys[0].value.apertureRadius==0); // failed decode preserves output.
 }
 TEST_CASE(rejects_unknown_fields_duplicate_keys_and_lossy_enum_conversions) {

@@ -15,6 +15,7 @@ bool LightShowPresenter::append(render::Renderer& renderer,render::RenderScene& 
         target.light.castShadow=s.shadow;target.volumetric=s.volumetric;
         target.apertureRadius=s.apertureRadius;
         target.pattern=static_cast<render::LightPattern>(s.gobo);target.patternRotation=s.goboRotation;target.patternScale=s.goboScale;
+        target.patternFocus=s.goboFocus;target.iris=s.iris;
     }
     _pointData.resize(frame.points.size());
     for(size_t i=0;i<_pointData.size();++i) {

@@ -24,7 +24,7 @@
 using namespace ayt;
 namespace {
 constexpr int toolbarHeight=84;
-enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky };
+enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes };
 struct Studio {
     render::Renderer renderer;
     sequence::LightShowPlayer player;
@@ -38,6 +38,7 @@ struct Studio {
     bool running=true,initialized=false,hidden=false;
     uint16_t width=1280,height=800;
     std::string path,error;
+    float minimumSeparation=.5f;
     void updateReadout() {
         if(!valueReadout||!value||!property)return;
         const double v=double(SendMessageW(value,TBM_GETPOS,0,0))/1000;
@@ -49,6 +50,8 @@ struct Studio {
             case 8:number=std::min(4,int(v*5));break;case 9:number=v*20;suffix=L" Hz";break;
             case 10:number=v*20;break;case 11:number=.1+29.9*v;suffix=L" deg";break;
             case 12:number=v*.25;break;
+            case 13:number=v;break;case 14:number=.01+.99*v;break;
+            case 15:number=.25+3.75*v;break;
         }
         wchar_t text[64];swprintf_s(text,L"%.3g%ls",number,suffix);SetWindowTextW(valueReadout,text);
     }
@@ -96,6 +99,9 @@ struct Studio {
                 case 10:state.volumetric=v*20;break;
                 case 11:state.innerAngle=(.1f+v*29.9f)*float(std::numbers::pi/180);state.outerAngle=std::max(state.outerAngle,state.innerAngle+.005f);break;
                 case 12:state.apertureRadius=v*.25f;break;
+                case 13:state.goboFocus=v;break;
+                case 14:state.iris=.01f+.99f*v;break;
+                case 15:state.goboScale=.25f+3.75f*v;break;
             }
             const double time=player.time();
             auto found=std::lower_bound(track.keys.begin(),track.keys.end(),time,[](const auto& k,double t){return k.time<t;});
@@ -138,6 +144,21 @@ struct Studio {
         if(id==Restart){player.stop();player.play();}
         if(id==Open)file(false);if(id==Save)file(true);if(id==AddKey)key();
         if(id==Circle)formation(false);if(id==Sphere)formation(true);
+        if(id==CheckRoutes){
+            sequence::FormationClearanceReport report;
+            if(show->analyzeFormationClearance(minimumSeparation,2000000,64,report)){
+                wchar_t message[256];
+                if(report.conflicts.empty())
+                    swprintf_s(message,L"No close approaches found (minimum %.2f units).%ls",
+                        minimumSeparation,report.complete?L"":L" Search limit reached; result is incomplete.");
+                else
+                    swprintf_s(message,L"%zu close approaches found (minimum %.2f units). First: IDs %u / %u at %.3f s, distance %.3f.%ls",
+                        report.conflicts.size(),minimumSeparation,report.conflicts.front().firstId,
+                        report.conflicts.front().secondId,report.conflicts.front().time,
+                        report.conflicts.front().distance,report.complete?L"":L" Search limit reached; result is incomplete.");
+                MessageBoxW(window,message,L"Formation clearance",MB_OK|MB_ICONINFORMATION);
+            }
+        }
         if(id==Palette){auto data=show->data();for(auto& key:data.formations)for(auto& p:key.points)std::rotate(p.color.begin(),p.color.begin()+1,p.color.end());edit(std::move(data));}
         if(id==Undo&&!undo.empty()){redo.push_back(show);auto next=undo.back();undo.pop_back();install(std::move(next),false);}
         if(id==Redo&&!redo.empty()){undo.push_back(show);auto next=redo.back();redo.pop_back();install(std::move(next),false);}
@@ -160,6 +181,11 @@ LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM w,LPARAM l) {
 }
 int main(int argc,char** argv) {
     uint32_t fixtures=32,points=1000,frames=0,steps=48;double startTime=0;
+    uint32_t windowWidth=1280,windowHeight=800;
+    uint32_t surfaceBudget=64,volumeBudget=32,shadowBudget=4;
+    uint32_t pointBudget=65536;
+    bool stepsExplicit=false,volumeExplicit=false,pointExplicit=false;
+    render::PerformanceLightBudget lightBudget{64,32,4};
     bool patterns=false;std::string capture,preset,sceneMode="occluders";
     render::Backend backend=render::Backend::Direct3D11;Studio s;
     for(int i=1;i<argc;++i) {
@@ -168,7 +194,14 @@ int main(int argc,char** argv) {
         else if(arg=="--frames"&&i+1<argc)frames=std::stoul(argv[++i]);
         else if(arg=="--points"&&i+1<argc)points=std::stoul(argv[++i]);
         else if(arg=="--fixtures"&&i+1<argc)fixtures=std::stoul(argv[++i]);
-        else if(arg=="--steps"&&i+1<argc)steps=std::stoul(argv[++i]);
+        else if(arg=="--steps"&&i+1<argc){steps=std::stoul(argv[++i]);stepsExplicit=true;}
+        else if(arg=="--width"&&i+1<argc)windowWidth=std::stoul(argv[++i]);
+        else if(arg=="--height"&&i+1<argc)windowHeight=std::stoul(argv[++i]);
+        else if(arg=="--surface-lights"&&i+1<argc)surfaceBudget=std::stoul(argv[++i]);
+        else if(arg=="--volume-lights"&&i+1<argc){volumeBudget=std::stoul(argv[++i]);volumeExplicit=true;}
+        else if(arg=="--shadow-lights"&&i+1<argc)shadowBudget=std::stoul(argv[++i]);
+        else if(arg=="--point-budget"&&i+1<argc){pointBudget=std::stoul(argv[++i]);pointExplicit=true;}
+        else if(arg=="--min-separation"&&i+1<argc)s.minimumSeparation=std::stof(argv[++i]);
         else if(arg=="--patterns")patterns=true;
         else if(arg=="--preset"&&i+1<argc)preset=argv[++i];
         else if(arg=="--scene"&&i+1<argc)sceneMode=argv[++i];
@@ -187,26 +220,40 @@ int main(int argc,char** argv) {
     }
     if(patterns)for(size_t i=0;i<data.fixtures.size();++i)
         for(auto& key:data.fixtures[i].keys)key.value.gobo=static_cast<sequence::ShowGobo>(i%5);
-    if(steps<8||steps>64||(sceneMode!="air"&&sceneMode!="floor"&&sceneMode!="occluders")){
-        std::fprintf(stderr,"Expected --steps 8..64 and --scene air|floor|occluders\n");return 2;
+    if(windowWidth>=1600){
+        if(!stepsExplicit)steps=24;
+        if(!volumeExplicit)volumeBudget=12;
+        if(!pointExplicit)pointBudget=1024;
     }
+    if(steps<8||steps>64||windowWidth<1280||windowWidth>8192||windowHeight<480||windowHeight>8192
+        ||surfaceBudget>256||volumeBudget>64||shadowBudget>8||pointBudget>65536
+        ||!std::isfinite(s.minimumSeparation)||s.minimumSeparation<=0
+        ||(sceneMode!="air"&&sceneMode!="floor"&&sceneMode!="occluders")){
+        std::fprintf(stderr,"Invalid viewport, light budget, --steps, --min-separation or --scene\n");return 2;
+    }
+    s.width=static_cast<uint16_t>(windowWidth);s.height=static_cast<uint16_t>(windowHeight);
+    lightBudget={static_cast<uint16_t>(surfaceBudget),static_cast<uint8_t>(volumeBudget),static_cast<uint8_t>(shadowBudget)};
     if(!s.path.empty()&&!sequence::loadLightShow(s.path,data,&s.error)){std::fprintf(stderr,"%s\n",s.error.c_str());return 1;}
     s.show=sequence::CompiledLightShow::compile(std::move(data),&s.error);if(!s.show)return 2;
     s.player.bind(s.show);if(!s.player.seek(startTime)){std::fprintf(stderr,"Invalid --time\n");return 2;}s.player.play();
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_BAR_CLASSES};InitCommonControlsEx(&controls);
     WNDCLASSW wc{};wc.lpfnWndProc=procedure;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"AliyatLightShowStudio";wc.hCursor=LoadCursor(nullptr,IDC_ARROW);RegisterClassW(&wc);
-    const HWND window=CreateWindowExW(0,wc.lpszClassName,L"Aliyat Light Show Studio",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,1300,860,nullptr,nullptr,wc.hInstance,&s);
+    RECT windowRect{0,0,LONG(s.width),LONG(s.height)};
+    AdjustWindowRectEx(&windowRect,WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,FALSE,0);
+    const HWND window=CreateWindowExW(0,wc.lpszClassName,L"Aliyat Light Show Studio",WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,CW_USEDEFAULT,CW_USEDEFAULT,
+        windowRect.right-windowRect.left,windowRect.bottom-windowRect.top,nullptr,nullptr,wc.hInstance,&s);
     if(!window)return 3;
     int x=8;for(const auto& [label,id]:{std::pair{L"Play / Pause",Play},{L"Restart",Restart},{L"Open",Open},{L"Save As",Save},{L"Undo",Undo},{L"Redo",Redo},{L"Circle key",Circle},{L"Sphere key",Sphere},{L"Palette",Palette}}){control(window,L"BUTTON",label,id,x,6,100,26);x+=104;}
     s.time=control(window,TRACKBAR_CLASSW,L"",Time,950,4,280,28,TBS_NOTICKS);SendMessageW(s.time,TBM_SETRANGE,TRUE,MAKELPARAM(0,1000));
     s.target=control(window,L"COMBOBOX",L"",Target,8,42,170,350,CBS_DROPDOWNLIST|WS_VSCROLL);
     s.property=control(window,L"COMBOBOX",L"",Property,188,42,170,350,CBS_DROPDOWNLIST);
-    for(const auto* name:{L"Intensity",L"Pan",L"Tilt",L"Field half-angle (deg)",L"Pattern rotation",L"Red",L"Green",L"Blue",L"Pattern",L"Strobe Hz",L"Volume strength",L"Core half-angle (deg)",L"Aperture radius (units)"})SendMessageW(s.property,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));
+    for(const auto* name:{L"Intensity",L"Pan",L"Tilt",L"Field half-angle (deg)",L"Pattern rotation",L"Red",L"Green",L"Blue",L"Pattern",L"Strobe Hz",L"Volume strength",L"Core half-angle (deg)",L"Aperture radius (units)",L"Pattern focus",L"Iris opening",L"Pattern scale"})SendMessageW(s.property,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));
     SendMessageW(s.property,CB_SETCURSEL,0,0);s.targets();
     s.value=control(window,TRACKBAR_CLASSW,L"",Value,370,39,230,30,TBS_NOTICKS);SendMessageW(s.value,TBM_SETRANGE,TRUE,MAKELPARAM(0,1000));SendMessageW(s.value,TBM_SETPOS,TRUE,500);
     s.valueReadout=control(window,L"STATIC",L"",0,604,46,76,22);s.updateReadout();
     control(window,L"BUTTON",L"Add / update key",AddKey,680,41,150,27);
     control(window,L"BUTTON",L"Both",ViewBoth,846,41,100,27);control(window,L"BUTTON",L"Stage",ViewStage,954,41,100,27);control(window,L"BUTTON",L"Sky",ViewSky,1062,41,100,27);
+    control(window,L"BUTTON",L"Check routes",CheckRoutes,1168,41,112,27);
     if(!s.hidden)ShowWindow(window,SW_SHOW);
     render::InitDesc init;init.windowHandle=window;init.width=s.width;init.height=s.height;init.vsync=false;init.msaa=0;init.backend=backend;
     if(!s.renderer.initialize(init)){DestroyWindow(window);return 4;}s.initialized=true;
@@ -230,7 +277,7 @@ int main(int argc,char** argv) {
         render::RenderScene scene;
         if(sceneMode!="air")scene.add(cube,material,math::translate(0.f,-.2f,0.f)*math::scale(24.f,.4f,24.f));
         if(sceneMode=="occluders")for(int i=0;i<5;++i)scene.add(cube,material,math::translate(float(i*3-6),1.5f,0)*math::scale(1.f,3.f,1.f));
-        if(!s.presenter.append(s.renderer,scene,s.frame,view,projection,s.width,viewHeight,{64,32,4},{.75f,true,65536},&s.error)){
+        if(!s.presenter.append(s.renderer,scene,s.frame,view,projection,s.width,viewHeight,lightBudget,{.75f,true,pointBudget},&s.error)){
             std::fprintf(stderr,"%s\n",s.error.c_str());s.running=false;
         }
         s.renderer.beginFrame({.005f,.006f,.012f,1});s.renderer.render(scene);
@@ -249,7 +296,11 @@ int main(int argc,char** argv) {
     if(!timings.empty()) {
         std::sort(timings.begin(),timings.end());double sum=0;for(double t:timings)sum+=t;
         const auto stats=s.renderer.performanceLightStats();
-        std::printf("{\"samples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"visiblePoints\":%u}\n",timings.size(),s.width,s.height-toolbarHeight,sum/timings.size(),timings[size_t((timings.size()-1)*.95)],stats.surfaceDraws,stats.volumeDraws,s.presenter.pointStats().visible);
+        const auto pointStats=s.presenter.pointStats();
+        std::printf("{\"samples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u}\n",
+            timings.size(),s.width,s.height-toolbarHeight,sum/timings.size(),timings[size_t((timings.size()-1)*.95)],
+            stats.surfaceDraws,stats.volumeDraws,stats.volumeBudgetSkipped,
+            pointStats.source,pointStats.visible,pointStats.budgetSkipped);
     }
     s.renderer.shutdown();s.initialized=false;DestroyWindow(window);return s.error.empty()?0:5;
 }

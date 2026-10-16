@@ -25,6 +25,8 @@ struct FixtureState {
     float innerAngle = 0.035f, outerAngle = 0.05236f;
     float volumetric = 1;
     float goboRotation = 0, goboScale = 1;
+    /// Pattern edge blur [0,1] and normalized iris opening (0,1].
+    float goboFocus = 0, iris = 1;
     ShowGobo gobo = ShowGobo::Open;
     bool shadow = false;
     /// Exit-aperture radius in world units, [0,1]; zero is a point source.
@@ -68,6 +70,19 @@ struct LightShowFrame {
     std::vector<ShowPoint> points;
 };
 
+struct FormationClearanceConflict {
+    std::uint32_t firstId = 0, secondId = 0;
+    /// Show time at closest approach, in seconds.
+    double time = 0;
+    float distance = 0;
+};
+struct FormationClearanceReport {
+    std::vector<FormationClearanceConflict> conflicts;
+    std::size_t checkedPairs = 0;
+    /// False when a caller-supplied work or result limit was reached.
+    bool complete = true;
+};
+
 /// Immutable validated performance data, independent of Renderer/World/audio.
 /// Compile canonicalizes formation points by stable ID; all formations must
 /// contain the same IDs. Bounds: 256 fixtures, 65536 points, 1M total samples,
@@ -81,6 +96,15 @@ public:
     /// Set procedural=false to sample authored keys for editing, excluding
     /// sweep and strobe modulation. Playback always includes procedural motion.
     bool evaluate(double time, LightShowFrame& output, bool procedural = true) const;
+    /// Check simultaneous drone separation over every authored formation interval.
+    /// Linear and Smooth use the same geometric line and a shared monotone time
+    /// parameter, so closest approach is solved continuously, not frame-sampled.
+    /// Step keys jump instantly; the held and next key positions are checked.
+    /// This is an authoring diagnostic, not flight-path planning or a safety
+    /// certification. Invalid limits leave output unchanged.
+    bool analyzeFormationClearance(float minimumDistance, std::size_t maxPairChecks,
+                                   std::size_t maxConflicts,
+                                   FormationClearanceReport& output) const;
     const LightShow& data() const noexcept { return _data; }
 private:
     explicit CompiledLightShow(LightShow data) : _data(std::move(data)) {}
@@ -97,6 +121,10 @@ public:
     void stop() noexcept { _playing = false; _time = 0; }
     bool seek(double time);
     bool advance(double delta);
+    /// Drive playback from an external absolute clock, e.g. an audio playhead.
+    /// Idempotent for repeated timestamps; pause holds, loops wrap and Once
+    /// holds the endpoint. Caller owns clock latency/transport synchronization.
+    bool synchronize(double elapsedSeconds);
     bool evaluate(LightShowFrame& output) const;
     double time() const noexcept { return _time; }
     bool playing() const noexcept { return _playing; }
