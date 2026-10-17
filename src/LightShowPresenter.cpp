@@ -1,6 +1,7 @@
 #include <AYSequence/LightShowPresenter.h>
 #include <AYRenderer.h>
 #include <cmath>
+#include <algorithm>
 namespace ayt::sequence {
 void LightShowPresenter::bindGoboTexture(std::uint32_t fixtureId,render::TextureHandle texture) {
     if(texture.isValid())_goboTextures[fixtureId]=texture;
@@ -17,7 +18,7 @@ bool LightShowPresenter::append(render::Renderer& renderer,render::RenderScene& 
         target.light=render::Light::spot({s.position[0],s.position[1],s.position[2]},direction,s.range,s.intensity,
             std::cos(s.innerAngle),std::cos(s.outerAngle),{s.color[0],s.color[1],s.color[2]});
         target.light.castShadow=s.shadow;target.volumetric=s.volumetric;
-        target.apertureRadius=s.apertureRadius;
+        target.apertureRadius=s.apertureRadius;target.constantFlux=_constantFlux;
         target.pattern=static_cast<render::LightPattern>(s.gobo);target.patternRotation=s.goboRotation;target.patternScale=s.goboScale;
         target.patternFocus=s.goboFocus;target.iris=s.iris;
         target.shadowSoftness=s.shadowSoftness;
@@ -36,7 +37,20 @@ bool LightShowPresenter::append(render::Renderer& renderer,render::RenderScene& 
         const auto& p=frame.points[i];
         _pointData[i]={p.id,{p.position[0],p.position[1],p.position[2]},{p.color[0],p.color[1],p.color[2]},p.intensity,p.radius};
     }
+    render::EmissivePointLightingStats aggregateStats;
+    auto settings=_pointLighting;
+    if(settings.maxLights>64){if(error)*error="Point light budget exceeds64";return false;}
+    if(settings.maxLights>0){
+        settings.maxLights=std::min<uint16_t>(settings.maxLights,uint16_t(256-_lights.size()));
+        if(!render::buildEmissivePointLights(_pointData,settings,_aggregateLights,aggregateStats,error))return false;
+    }else{_aggregateLights.clear();aggregateStats.source=uint32_t(_pointData.size());}
+    for(auto light:_aggregateLights){
+        uint32_t id=0;
+        while(std::any_of(_lights.begin(),_lights.end(),[&](const auto& l){return l.id==id;}))++id;
+        light.id=id;light.priority=-1;_lights.push_back(light);
+    }
     if(!renderer.setPerformanceLights(_lights,lightBudget,error))return false;
+    _pointLightingStats=aggregateStats;
     return _points.append(renderer,scene,_pointData,view,projection,width,height,pointSettings,error);
 }
 } // namespace ayt::sequence

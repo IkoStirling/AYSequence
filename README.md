@@ -208,3 +208,21 @@ Spatial 实体的 Transform 为不可移除的固有姿态。序列回归保留�
 使绑定失效：播放继续，停止后恢复基态。只调整旧测试假设，未修改运行时逻辑。
 SceneSequenceTests：29/29 用例、179 断言通过。报告：
 out/main-consolidation-20261016/sequence-accepted.json。
+
+## 2026-10-18 关键帧编排与聚合照明
+
+`AYSequence::EditorCore` 的 `LightShowAuthoring.h/editLightShowKeys` 对选定灯具ID和/或
+编队键执行Move/Copy/Remove/Interpolation。源时间容差1e-6秒，缺少匹配键的轨道跳过，
+至少一个键须命中；目标时间冲突、缺失/重复ID、越界或删除最后一个灯具键时整次拒绝。
+先验证输入、暂存编辑再编译发布，输入输出可别名；不做I/O，不推进播放器，历史由宿主拥有。
+Studio第三行提供Fixture/Formation lane、Previous/Next精确定位、目标秒数、移动/复制/删除
+和Step/Linear/Smooth设置，沿用原有快照撤销重做。
+
+Presenter默认仍关闭点阵照明。setPointLighting传入EmissivePointLightingSettings可启用
+最多64个世界网格聚合点光；点阵显示maxPoints不影响聚合。灯具优先，共享256灯包与
+表面预算，Point不产生体积/阴影；pointLightingStats报告的是准备量，实际提交看Renderer统计。
+Studio的Point light on/off切换0/16；--point-lights 0..64、--point-light-cell、
+--point-light-range、--point-light-scale设置预览参数，均为会话设置，不写schema4。
+`setConstantFlux`/`--constant-flux`/Flux zoom on/off对所有灯具启用相同的远场角光通变焦
+归一化；参考核心/外场半角2°/3°，表面与体积共享比例，Gobo/光阑仍吸收能量。
+有限出光口近场、真实镜头焦面与棱镜尚未模拟。

@@ -1,4 +1,5 @@
 #include <AYSequence/LightShow.h>
+#include <AYSequence/LightShowAuthoring.h>
 #include <AYSequence/LightShowAssetIO.h>
 #include <AYTest.h>
 #include <AYTestFixtures.h>
@@ -18,6 +19,37 @@ LightShow showFixture() {
     return data;
 }
 }
+TEST_SUITE(LightShowAuthoringTests)
+TEST_CASE(move_copy_remove_and_interpolation_are_atomic_and_keep_stable_ids) {
+    auto data=showFixture();const std::array<uint32_t,1> ids{7};LightShow edited;std::string error;
+    CHECK(editLightShowKeys(data,ids,true,4,3,LightShowKeyEdit::Move,ShowInterpolation::Linear,edited,&error));
+    CHECK(data.fixtures[0].keys[1].time==4);CHECK(edited.fixtures[0].keys[1].time==3);CHECK(edited.formations[1].time==3);
+    CHECK(edited.formations[1].points[0].id==42);CHECK(edited.fixtures[0].id==7);
+    CHECK(editLightShowKeys(edited,ids,true,3,2,LightShowKeyEdit::Copy,ShowInterpolation::Linear,edited));
+    CHECK(edited.fixtures[0].keys.size()==3);CHECK(edited.formations.size()==3);
+    CHECK(editLightShowKeys(edited,ids,true,2,2,LightShowKeyEdit::Interpolation,ShowInterpolation::Step,edited));
+    CHECK(edited.fixtures[0].keys[1].interpolation==ShowInterpolation::Step);CHECK(edited.formations[1].interpolation==ShowInterpolation::Step);
+    CHECK(editLightShowKeys(edited,ids,true,2,2,LightShowKeyEdit::Remove,ShowInterpolation::Linear,edited));
+    CHECK(edited.fixtures[0].keys.size()==2);CHECK(edited.formations.size()==2);
+    CHECK(!editLightShowKeys(edited,ids,true,3,0,LightShowKeyEdit::Move,ShowInterpolation::Linear,edited,&error));
+    CHECK(!error.empty());CHECK(edited.formations[1].time==3);
+}
+TEST_CASE(key_edit_rejects_last_key_missing_targets_invalid_times_and_partial_collisions) {
+    auto data=showFixture();data.fixtures.push_back(data.fixtures[0]);data.fixtures[1].id=8;
+    data.fixtures[1].keys[1].time=3;const std::array<uint32_t,2> ids{7,8};LightShow output=showFixture();
+    CHECK(!editLightShowKeys(data,ids,false,0,3,LightShowKeyEdit::Move,ShowInterpolation::Linear,output));
+    CHECK(output.fixtures.size()==1);CHECK(output.fixtures[0].keys[0].time==0);
+    CHECK(!editLightShowKeys(data,ids,true,0,5,LightShowKeyEdit::Copy,ShowInterpolation::Linear,output));
+    CHECK(!editLightShowKeys(data,ids,true,0,std::numeric_limits<double>::quiet_NaN(),LightShowKeyEdit::Move,ShowInterpolation::Linear,output));
+    CHECK(!editLightShowKeys(data,std::array<uint32_t,1>{99},false,0,2,LightShowKeyEdit::Copy,ShowInterpolation::Linear,output));
+    CHECK(!editLightShowKeys(data,std::array<uint32_t,2>{7,7},false,0,2,LightShowKeyEdit::Copy,ShowInterpolation::Linear,output));
+    CHECK(!editLightShowKeys(data,ids,true,1,2,LightShowKeyEdit::Move,ShowInterpolation::Linear,output));
+    data.fixtures[0].keys.resize(1);
+    CHECK(!editLightShowKeys(data,ids,false,0,0,LightShowKeyEdit::Remove,ShowInterpolation::Linear,output));
+    CHECK(output.fixtures[0].keys.size()==2);
+}
+TEST_SUITE_END
+
 TEST_SUITE(LightShowCoreTests)
 TEST_CASE(aperture_and_two_cone_angles_interpolate_and_reject_invalid_optics) {
     auto data=showFixture();auto& keys=data.fixtures[0].keys;

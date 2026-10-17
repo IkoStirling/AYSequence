@@ -11,6 +11,7 @@
 #include <AYRenderer/PbrShaderSources.h>
 #include <AYSequence/LightShowPresenter.h>
 #include <AYSequence/LightShowAssetIO.h>
+#include <AYSequence/LightShowAuthoring.h>
 #if defined(AY_LIGHTSHOW_AUDIO)
 #include <AYAudio/AudioEngine.h>
 #include <AYResource/Converter/AudioDecoder.h>
@@ -29,8 +30,8 @@
 
 using namespace ayt;
 namespace {
-constexpr int toolbarHeight=184;
-enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle,ToggleFogMotion };
+constexpr int toolbarHeight=218;
+enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle,ToggleFogMotion,KeyLane,KeyDestination,KeyInterpolation,MoveKey,CopyKey,RemoveKey,ApplyInterpolation,PreviousKey,NextKey,TogglePointLights,ToggleFlux };
 struct ShowRevision { std::shared_ptr<const sequence::CompiledLightShow> show; std::string path; };
 #if defined(AY_LIGHTSHOW_AUDIO)
 // Studio-only bridge: the decoded clip's playback head is the show clock.
@@ -141,7 +142,43 @@ struct Studio {
     MusicTransport music;
 #endif
     std::unordered_map<std::string,render::TextureHandle> goboTextures;
+    HWND keyLane=nullptr,keyDestination=nullptr,keyInterpolation=nullptr;
+    render::EmissivePointLightingSettings pointLighting{0};
+    bool constantFlux=false;
     float minimumSeparation=.5f;
+    std::vector<uint32_t> selectedFixtureIds() const {
+        std::vector<uint32_t> result;
+        const auto selected=SendMessageW(target,CB_GETCURSEL,0,0);
+        if(selected>=0&&size_t(selected)<targetMembers.size())for(auto index:targetMembers[size_t(selected)])
+            result.push_back(show->data().fixtures[index].id);
+        return result;
+    }
+    void adjacentKey(bool next){
+        const bool formations=SendMessageW(keyLane,CB_GETCURSEL,0,0)==1;
+        const auto ids=selectedFixtureIds();double best=next?show->data().duration:0;bool found=false;
+        const auto scan=[&](const auto& keys){for(const auto& key:keys){
+            if((next&&key.time>player.time()+1e-6&&(!found||key.time<best))
+                ||(!next&&key.time<player.time()-1e-6&&(!found||key.time>best))){best=key.time;found=true;}
+        }};
+        if(formations)scan(show->data().formations);
+        else for(const auto& track:show->data().fixtures)if(std::find(ids.begin(),ids.end(),track.id)!=ids.end())scan(track.keys);
+        if(found)seekPreview(best);
+    }
+    void editKeys(sequence::LightShowKeyEdit operation){
+        error.clear();
+        wchar_t text[64]{};GetWindowTextW(keyDestination,text,64);wchar_t* end=nullptr;
+        const double destination=std::wcstod(text,&end);
+        const bool timed=operation==sequence::LightShowKeyEdit::Move||operation==sequence::LightShowKeyEdit::Copy;
+        if(timed&&(end==text||*end!=0||!std::isfinite(destination))){
+            MessageBoxW(window,L"Enter a destination time in seconds.",L"Key edit",MB_OK|MB_ICONWARNING);return;
+        }
+        const bool formations=SendMessageW(keyLane,CB_GETCURSEL,0,0)==1;
+        const auto ids=formations?std::vector<uint32_t>{}:selectedFixtureIds();sequence::LightShow edited;
+        const auto mode=static_cast<sequence::ShowInterpolation>(SendMessageW(keyInterpolation,CB_GETCURSEL,0,0));
+        if(sequence::editLightShowKeys(show->data(),ids,formations,player.time(),timed?destination:player.time(),operation,mode,edited,&error)){
+            const auto time=timed?destination:player.time();edit(std::move(edited));seekPreview(time);
+        }else MessageBoxA(window,error.c_str(),"Key edit",MB_OK|MB_ICONWARNING);
+    }
     render::VolumetricSettings fog;
     void rebuildTimeline(){
         timelineBins.fill(0);if(!show)return;
@@ -372,6 +409,13 @@ struct Studio {
 #endif
     void command(int id) {
         if(id==Property)updateReadout();
+        if(id==PreviousKey)adjacentKey(false);if(id==NextKey)adjacentKey(true);
+        if(id==MoveKey)editKeys(sequence::LightShowKeyEdit::Move);
+        if(id==CopyKey)editKeys(sequence::LightShowKeyEdit::Copy);
+        if(id==RemoveKey)editKeys(sequence::LightShowKeyEdit::Remove);
+        if(id==ApplyInterpolation)editKeys(sequence::LightShowKeyEdit::Interpolation);
+        if(id==TogglePointLights){pointLighting.maxLights=pointLighting.maxLights?0:16;presenter.setPointLighting(pointLighting);}
+        if(id==ToggleFlux){constantFlux=!constantFlux;presenter.setConstantFlux(constantFlux);}
         if(id==ViewBoth)cameraMode=0;if(id==ViewStage)cameraMode=1;if(id==ViewSky)cameraMode=2;
         if(id==Play){
             if(player.playing()){
@@ -516,7 +560,7 @@ LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM w,LPARAM l) {
     if(!s)return DefWindowProcW(window,message,w,l);
     if(message==WM_CLOSE){s->running=false;return 0;}
     if(message==WM_COMMAND){s->command(LOWORD(w));return 0;}
-    if(message==WM_SIZE){s->width=static_cast<uint16_t>(std::max(1,int(LOWORD(l))));s->height=static_cast<uint16_t>(std::max(toolbarHeight+1,int(HIWORD(l))));if(s->timeline)MoveWindow(s->timeline,8,112,std::max(1,int(s->width)-16),64,TRUE);if(s->initialized)s->renderer.resize(s->width,s->height);return 0;}
+    if(message==WM_SIZE){s->width=static_cast<uint16_t>(std::max(1,int(LOWORD(l))));s->height=static_cast<uint16_t>(std::max(toolbarHeight+1,int(HIWORD(l))));if(s->timeline)MoveWindow(s->timeline,8,146,std::max(1,int(s->width)-16),64,TRUE);if(s->initialized)s->renderer.resize(s->width,s->height);return 0;}
     if(message==WM_HSCROLL&&reinterpret_cast<HWND>(l)==s->time){s->seekPreview(double(SendMessageW(s->time,TBM_GETPOS,0,0))/1000*s->show->data().duration);return 0;}
     if(message==WM_HSCROLL&&reinterpret_cast<HWND>(l)==s->value){s->updateReadout();return 0;}
     return DefWindowProcW(window,message,w,l);
@@ -544,6 +588,11 @@ int main(int argc,char** argv) {
         else if(arg=="--volume-lights"&&i+1<argc){volumeBudget=std::stoul(argv[++i]);volumeExplicit=true;}
         else if(arg=="--shadow-lights"&&i+1<argc)shadowBudget=std::stoul(argv[++i]);
         else if(arg=="--point-budget"&&i+1<argc){pointBudget=std::stoul(argv[++i]);pointExplicit=true;}
+        else if(arg=="--point-lights"&&i+1<argc){const auto count=std::stoul(argv[++i]);if(count>64)return 1;s.pointLighting.maxLights=uint16_t(count);}
+        else if(arg=="--point-light-cell"&&i+1<argc)s.pointLighting.cellSize=std::stof(argv[++i]);
+        else if(arg=="--point-light-range"&&i+1<argc)s.pointLighting.range=std::stof(argv[++i]);
+        else if(arg=="--point-light-scale"&&i+1<argc)s.pointLighting.intensityScale=std::stof(argv[++i]);
+        else if(arg=="--constant-flux")s.constantFlux=true;
         else if(arg=="--point-cpu")pointCpu=true;
         else if(arg=="--static-fog")staticFog=true;
         else if(arg=="--smoke-box"&&i+6<argc){s.fog.local=true;s.fog.center={std::stof(argv[++i]),std::stof(argv[++i]),std::stof(argv[++i])};s.fog.halfExtent={std::stof(argv[++i]),std::stof(argv[++i]),std::stof(argv[++i])};}
@@ -558,6 +607,7 @@ int main(int argc,char** argv) {
         else if(arg=="--backend"&&i+1<argc)backend=std::string(argv[++i])=="d3d12"?render::Backend::Direct3D12:render::Backend::Direct3D11;
         else s.path=arg;
     }
+    s.presenter.setPointLighting(s.pointLighting);s.presenter.setConstantFlux(s.constantFlux);
     sequence::LightShow data=sequence::makeLightShowExample(fixtures,points);
     if(preset=="single") {
         s.cameraMode=3;
@@ -624,7 +674,21 @@ int main(int argc,char** argv) {
     control(window,L"BUTTON",L"Plan route",PlanRoute,718,77,130,26);
     control(window,L"BUTTON",L"Export show folder...",ExportBundle,856,77,180,26);
     control(window,L"BUTTON",L"Animated fog on/off",ToggleFogMotion,1044,77,188,26);
-    s.timeline=CreateWindowExW(0,timelineClass.lpszClassName,L"",WS_CHILD|WS_VISIBLE,8,112,
+    s.keyLane=control(window,L"COMBOBOX",L"",KeyLane,8,112,150,150,CBS_DROPDOWNLIST);
+    for(const auto* label:{L"Fixture keys",L"Formation keys"})SendMessageW(s.keyLane,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label));
+    SendMessageW(s.keyLane,CB_SETCURSEL,0,0);
+    control(window,L"BUTTON",L"Previous",PreviousKey,166,112,80,26);control(window,L"BUTTON",L"Next",NextKey,250,112,65,26);
+    control(window,L"STATIC",L"To (s)",0,323,117,48,22);
+    s.keyDestination=control(window,L"EDIT",L"1",KeyDestination,372,112,80,26,WS_BORDER|ES_AUTOHSCROLL);
+    control(window,L"BUTTON",L"Move",MoveKey,460,112,65,26);control(window,L"BUTTON",L"Copy",CopyKey,533,112,65,26);
+    control(window,L"BUTTON",L"Delete",RemoveKey,606,112,65,26);
+    s.keyInterpolation=control(window,L"COMBOBOX",L"",KeyInterpolation,679,112,90,150,CBS_DROPDOWNLIST);
+    for(const auto* label:{L"Step",L"Linear",L"Smooth"})SendMessageW(s.keyInterpolation,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label));
+    SendMessageW(s.keyInterpolation,CB_SETCURSEL,1,0);
+    control(window,L"BUTTON",L"Set mode",ApplyInterpolation,777,112,90,26);
+    control(window,L"BUTTON",L"Point light on/off",TogglePointLights,875,112,160,26);
+    control(window,L"BUTTON",L"Flux zoom on/off",ToggleFlux,1043,112,160,26);
+    s.timeline=CreateWindowExW(0,timelineClass.lpszClassName,L"",WS_CHILD|WS_VISIBLE,8,146,
         int(s.width)-16,64,window,nullptr,wc.hInstance,&s);
 #if defined(AY_LIGHTSHOW_AUDIO)
     control(window,L"BUTTON",L"Music...",LoadMusic,442,77,130,26);
@@ -701,18 +765,19 @@ int main(int argc,char** argv) {
         const double gpuP95=gpuTimings.empty()?0:gpuTimings[size_t((gpuTimings.size()-1)*.95)];
         const auto stats=s.renderer.performanceLightStats();
         const auto pointStats=s.presenter.pointStats();
+        const auto aggregate=s.presenter.pointLightingStats();
         double musicTime=0;bool musicLoaded=false;
 #if defined(AY_LIGHTSHOW_AUDIO)
         musicLoaded=s.music.loaded();
         if(musicLoaded)musicTime=double(s.music.engine.voicePositionFrames(s.music.voice))/s.music.engine.outputSampleRate();
 #endif
-        std::printf("{\"samples\":%zu,\"gpuSamples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"meanGpuMs\":%.4f,\"p95GpuMs\":%.4f,\"meanPresenterMs\":%.4f,\"meanRenderMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u,\"instancedPoints\":%s,\"showTimeSeconds\":%.4f,\"musicTimeSeconds\":%.4f,\"musicLoaded\":%s}\n",
+        std::printf("{\"samples\":%zu,\"gpuSamples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"meanGpuMs\":%.4f,\"p95GpuMs\":%.4f,\"meanPresenterMs\":%.4f,\"meanRenderMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u,\"instancedPoints\":%s,\"showTimeSeconds\":%.4f,\"musicTimeSeconds\":%.4f,\"musicLoaded\":%s,\"pointLightCells\":%u,\"pointLights\":%u,\"pointLightBudgetSkipped\":%u}\n",
             timings.size(),gpuTimings.size(),s.width,s.height-toolbarHeight,
             sum/timings.size(),timings[size_t((timings.size()-1)*.95)],gpuMean,gpuP95,
             presenterSum/presenterTimings.size(),renderSum/renderTimings.size(),
             stats.surfaceDraws,stats.volumeDraws,stats.volumeBudgetSkipped,
             pointStats.source,pointStats.visible,pointStats.budgetSkipped,
-            pointStats.instanced?"true":"false",s.player.time(),musicTime,musicLoaded?"true":"false");
+            pointStats.instanced?"true":"false",s.player.time(),musicTime,musicLoaded?"true":"false",aggregate.occupiedCells,aggregate.selectedLights,aggregate.budgetSkipped);
     }
     s.presenter.clearGoboTextures();
     for(auto& [name,texture]:s.goboTextures)s.renderer.destroyTexture(texture);

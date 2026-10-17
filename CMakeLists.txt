@@ -12,7 +12,7 @@ target_link_libraries(AYSequence PRIVATE AYAssetFormat)
 target_include_directories(AYSequence PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
-add_library(AYSequenceEditorCore STATIC src/SequenceAuthoring.cpp)
+add_library(AYSequenceEditorCore STATIC src/SequenceAuthoring.cpp src/LightShowAuthoring.cpp)
 add_library(AYSequence::EditorCore ALIAS AYSequenceEditorCore)
 target_link_libraries(AYSequenceEditorCore PUBLIC AYSequence)
 
@@ -54,7 +54,7 @@ if(TARGET AYRenderer)
     target_link_libraries(AYSequenceRendererIntegration PUBLIC AYSequence AYRenderer)
     if(WIN32 AND TARGET AYSequenceAssetIO)
         add_executable(AYLightShow_Studio demo/LightShowStudio.cpp)
-        target_link_libraries(AYLightShow_Studio PRIVATE AYSequenceRendererIntegration AYSequenceAssetIO comctl32 comdlg32 user32 gdi32)
+        target_link_libraries(AYLightShow_Studio PRIVATE AYSequenceRendererIntegration AYSequenceAssetIO AYSequenceEditorCore comctl32 comdlg32 user32 gdi32)
         if(TARGET AYAudio)
             target_link_libraries(AYLightShow_Studio PRIVATE AYAudio)
             target_compile_definitions(AYLightShow_Studio PRIVATE AY_LIGHTSHOW_AUDIO=1)
