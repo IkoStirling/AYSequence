@@ -21,10 +21,13 @@ AssetIO的exportLightShowBundle把已保存演出、实际引用的Gobo图片和
 Studio的Export show folder...导出当前节目，打开包内.lshow时自动读取包内音乐（需AYAudio）。
 可选AYSequence::RendererIntegration提供LightShowPresenter；Windows的AYLightShow_Studio
 支持真实渲染预览、时间跳转、灯具关键帧、编队键、调色和保存/撤销。
+Studio顶部时间轴同屏显示灯具键、编队键和已载入音乐的抽样波形；点击或拖动时间轴
+可暂停并定位播放头，随后用灯具滑条和Add / update key编辑当前时刻。
 角度编辑以度显示，数据为弧度；--steps 8..64控制积分上限，低分辨率默认48，
 无图案光束可按弦长自适应减少采样。
 工作台提供航线间距检查、1080p自动质量预算，以及--point-budget、--volume-lights等手动覆盖。
 Smoke box按钮或--smoke-box x y z halfX halfY halfZ可切换/配置局部雾盒。
+Studio默认启用缓慢变化的密度纹理，Animated fog on/off按钮或--static-fog可作静态对照。
 高分辨率默认保留最多10000可见点并优先GPU实例化；--point-cpu用于CPU四边形对照。
 隐藏验收JSON同时报告CPU墙钟、Renderer GPU帧计时、Presenter/渲染耗时及实例化状态。
 --preset single配合--scene air|floor|occluders提供单灯空中/落地/遮挡对照；--patterns显式打开图案示例。

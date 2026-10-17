@@ -16,6 +16,7 @@
 #include <AYResource/Converter/AudioDecoder.h>
 #endif
 #include <algorithm>
+#include <array>
 #include <chrono>
 #include <cmath>
 #include <cstdio>
@@ -28,8 +29,8 @@
 
 using namespace ayt;
 namespace {
-constexpr int toolbarHeight=112;
-enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle };
+constexpr int toolbarHeight=184;
+enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle,ToggleFogMotion };
 struct ShowRevision { std::shared_ptr<const sequence::CompiledLightShow> show; std::string path; };
 #if defined(AY_LIGHTSHOW_AUDIO)
 // Studio-only bridge: the decoded clip's playback head is the show clock.
@@ -39,6 +40,7 @@ struct MusicTransport {
     audio::AudioClipId clip=audio::InvalidClipId;
     audio::VoiceHandle voice=audio::InvalidVoice;
     std::string path;
+    std::array<float,1024> waveform{};
     double duration=0;
     bool loop=false;
     ~MusicTransport(){clear();engine.shutdown();}
@@ -46,7 +48,7 @@ struct MusicTransport {
     void clear(){
         if(voice!=audio::InvalidVoice){engine.stop(voice);voice=audio::InvalidVoice;}
         if(clip!=audio::InvalidClipId){engine.releaseClip(clip);clip=audio::InvalidClipId;}
-        path.clear();duration=0;
+        path.clear();duration=0;waveform.fill(0);
     }
     bool load(const std::string& selected,bool repeat,double start,bool playing,std::string& error){
         std::error_code ec;
@@ -56,6 +58,16 @@ struct MusicTransport {
         if(!resource::decodeAudioFile(selected,pcm)||pcm.empty()||pcm.bitsPerSample!=16
             ||pcm.frameCount>UINT32_MAX||pcm.bytes.size()>256ull*1024*1024){
             error="Cannot decode WAV, MP3 or OGG music (256 MiB PCM limit)";return false;
+        }
+        std::array<float,1024> peaks{};
+        const auto stride=std::max<uint64_t>(1,pcm.frameCount/(peaks.size()*256));
+        for(uint64_t frame=0;frame<pcm.frameCount;frame+=stride){
+            const auto bin=std::min<size_t>(peaks.size()-1,size_t(frame*peaks.size()/pcm.frameCount));
+            for(uint16_t channel=0;channel<pcm.channels;++channel){
+                const auto offset=size_t(frame*pcm.channels+channel)*2;
+                const auto sample=static_cast<int16_t>(uint16_t(pcm.bytes[offset])|(uint16_t(pcm.bytes[offset+1])<<8));
+                peaks[bin]=std::max(peaks[bin],float(std::abs(int(sample)))/32768);
+            }
         }
         if(!engine.isInitialized()){
             audio::AudioSettings settings;settings.backend=audio::AudioBackendKind::Miniaudio;
@@ -72,7 +84,7 @@ struct MusicTransport {
         const auto frame=static_cast<uint64_t>(std::clamp(start,0.0,nextDuration)*engine.outputSampleRate());
         engine.setVoicePositionFrames(nextVoice,frame);
         engine.setVoicePaused(nextVoice,!playing);
-        clear();clip=nextClip;voice=nextVoice;path=selected;duration=nextDuration;loop=repeat;
+        clear();clip=nextClip;voice=nextVoice;path=selected;duration=nextDuration;loop=repeat;waveform=peaks;
         error.clear();return true;
     }
     void pause(bool paused){if(voice!=audio::InvalidVoice)engine.setVoicePaused(voice,paused);}
@@ -120,7 +132,8 @@ struct Studio {
     std::deque<ShowRevision> undo,redo;
     std::vector<std::vector<size_t>> targetMembers;
     int cameraMode=0;
-    HWND window=nullptr,target=nullptr,property=nullptr,value=nullptr,time=nullptr,valueReadout=nullptr;
+    HWND window=nullptr,target=nullptr,property=nullptr,value=nullptr,time=nullptr,valueReadout=nullptr,timeline=nullptr;
+    std::array<uint8_t,1024> timelineBins{};
     bool running=true,initialized=false,hidden=false;
     uint16_t width=1280,height=800;
     std::string path,error;
@@ -130,6 +143,24 @@ struct Studio {
     std::unordered_map<std::string,render::TextureHandle> goboTextures;
     float minimumSeparation=.5f;
     render::VolumetricSettings fog;
+    void rebuildTimeline(){
+        timelineBins.fill(0);if(!show)return;
+        const auto mark=[&](double time,uint8_t flag){
+            const auto bin=std::min<size_t>(timelineBins.size()-1,
+                size_t(std::clamp(time/show->data().duration,0.0,1.0)*(timelineBins.size()-1)));
+            timelineBins[bin]|=flag;
+        };
+        for(const auto& fixture:show->data().fixtures)for(const auto& key:fixture.keys)mark(key.time,1);
+        for(const auto& key:show->data().formations)mark(key.time,2);
+        if(timeline)InvalidateRect(timeline,nullptr,FALSE);
+    }
+    void seekPreview(double seconds){
+        player.pause();player.seek(std::clamp(seconds,0.0,show->data().duration));
+#if defined(AY_LIGHTSHOW_AUDIO)
+        music.seek(player.time());music.pause(true);
+#endif
+        if(timeline)InvalidateRect(timeline,nullptr,FALSE);
+    }
     void updateReadout() {
         if(!valueReadout||!value||!property)return;
         const double v=double(SendMessageW(value,TBM_GETPOS,0,0))/1000;
@@ -191,7 +222,7 @@ struct Studio {
             music.clear();error="Music stopped while changing show loop mode";
         }
 #endif
-        targets();return true;
+        targets();rebuildTimeline();return true;
     }
     void edit(sequence::LightShow data) {
         auto next=sequence::CompiledLightShow::compile(std::move(data),&error);
@@ -416,6 +447,7 @@ struct Studio {
         }
         if(id==Palette){auto data=show->data();for(auto& key:data.formations)for(auto& p:key.points)std::rotate(p.color.begin(),p.color.begin()+1,p.color.end());edit(std::move(data));}
         if(id==SmokeBox){fog.local=!fog.local;if(initialized)renderer.setVolumetricSettings(fog);}
+        if(id==ToggleFogMotion){fog.noiseStrength=fog.noiseStrength>0?0:.35f;if(initialized)renderer.setVolumetricSettings(fog);}
         if(id==ToggleShadow){
             const auto selected=SendMessageW(target,CB_GETCURSEL,0,0);
             if(selected>=0&&size_t(selected)<targetMembers.size()){
@@ -435,18 +467,57 @@ struct Studio {
 HWND control(HWND parent,const wchar_t* type,const wchar_t* title,int id,int x,int y,int w,int h,DWORD style=0) {
     return CreateWindowExW(0,type,title,WS_CHILD|WS_VISIBLE|style,x,y,w,h,parent,reinterpret_cast<HMENU>(INT_PTR(id)),GetModuleHandleW(nullptr),nullptr);
 }
+LRESULT CALLBACK timelineProcedure(HWND window,UINT message,WPARAM w,LPARAM l){
+    auto* s=reinterpret_cast<Studio*>(GetWindowLongPtrW(window,GWLP_USERDATA));
+    if(message==WM_NCCREATE){
+        s=static_cast<Studio*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);
+        SetWindowLongPtrW(window,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(s));
+    }
+    if(!s)return DefWindowProcW(window,message,w,l);
+    if(message==WM_PAINT){
+        PAINTSTRUCT paint;const auto dc=BeginPaint(window,&paint);RECT rect;GetClientRect(window,&rect);
+        SetDCBrushColor(dc,RGB(19,24,34));FillRect(dc,&rect,HBRUSH(GetStockObject(DC_BRUSH)));
+        SelectObject(dc,GetStockObject(DC_PEN));SetBkMode(dc,TRANSPARENT);
+        SetTextColor(dc,RGB(180,190,210));
+        TextOutW(dc,8,8,L"Music",5);TextOutW(dc,8,37,L"Lights",6);TextOutW(dc,8,50,L"Formation",9);
+        const int left=100,right=std::max(left+1,int(rect.right)-8),span=right-left;
+        SetDCPenColor(dc,RGB(54,63,80));
+        for(int i=0;i<=10;++i){const int x=left+span*i/10;MoveToEx(dc,x,2,nullptr);LineTo(dc,x,rect.bottom-2);}
+#if defined(AY_LIGHTSHOW_AUDIO)
+        SetDCPenColor(dc,RGB(65,165,190));
+        for(size_t i=0;i<s->music.waveform.size();++i){
+            const int x=left+int(i*span/(s->music.waveform.size()-1));
+            const int half=int(s->music.waveform[i]*12);
+            MoveToEx(dc,x,19-half,nullptr);LineTo(dc,x,20+half);
+        }
+#endif
+        for(size_t i=0;i<s->timelineBins.size();++i){
+            const int x=left+int(i*span/(s->timelineBins.size()-1));
+            if(s->timelineBins[i]&1){SetDCPenColor(dc,RGB(245,153,67));MoveToEx(dc,x,36,nullptr);LineTo(dc,x,46);}
+            if(s->timelineBins[i]&2){SetDCPenColor(dc,RGB(127,216,152));MoveToEx(dc,x,49,nullptr);LineTo(dc,x,59);}
+        }
+        if(s->show){
+            const int x=left+int(std::clamp(s->player.time()/s->show->data().duration,0.0,1.0)*span);
+            SetDCPenColor(dc,RGB(255,255,255));MoveToEx(dc,x,1,nullptr);LineTo(dc,x,rect.bottom-1);
+        }
+        EndPaint(window,&paint);return 0;
+    }
+    if((message==WM_LBUTTONDOWN||message==WM_MOUSEMOVE&&(w&MK_LBUTTON))&&s->show){
+        RECT rect;GetClientRect(window,&rect);
+        const int span=std::max(1,int(rect.right)-108),x=int(short(LOWORD(l)));
+        s->seekPreview(std::clamp(double(x-100)/span,0.0,1.0)*s->show->data().duration);
+        return 0;
+    }
+    return DefWindowProcW(window,message,w,l);
+}
 LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM w,LPARAM l) {
     auto* s=reinterpret_cast<Studio*>(GetWindowLongPtrW(window,GWLP_USERDATA));
     if(message==WM_NCCREATE){s=static_cast<Studio*>(reinterpret_cast<CREATESTRUCTW*>(l)->lpCreateParams);SetWindowLongPtrW(window,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(s));s->window=window;}
     if(!s)return DefWindowProcW(window,message,w,l);
     if(message==WM_CLOSE){s->running=false;return 0;}
     if(message==WM_COMMAND){s->command(LOWORD(w));return 0;}
-    if(message==WM_SIZE){s->width=static_cast<uint16_t>(std::max(1,int(LOWORD(l))));s->height=static_cast<uint16_t>(std::max(toolbarHeight+1,int(HIWORD(l))));if(s->initialized)s->renderer.resize(s->width,s->height);return 0;}
-    if(message==WM_HSCROLL&&reinterpret_cast<HWND>(l)==s->time){s->player.pause();s->player.seek(double(SendMessageW(s->time,TBM_GETPOS,0,0))/1000*s->show->data().duration);
-#if defined(AY_LIGHTSHOW_AUDIO)
-        s->music.seek(s->player.time());s->music.pause(true);
-#endif
-        return 0;}
+    if(message==WM_SIZE){s->width=static_cast<uint16_t>(std::max(1,int(LOWORD(l))));s->height=static_cast<uint16_t>(std::max(toolbarHeight+1,int(HIWORD(l))));if(s->timeline)MoveWindow(s->timeline,8,112,std::max(1,int(s->width)-16),64,TRUE);if(s->initialized)s->renderer.resize(s->width,s->height);return 0;}
+    if(message==WM_HSCROLL&&reinterpret_cast<HWND>(l)==s->time){s->seekPreview(double(SendMessageW(s->time,TBM_GETPOS,0,0))/1000*s->show->data().duration);return 0;}
     if(message==WM_HSCROLL&&reinterpret_cast<HWND>(l)==s->value){s->updateReadout();return 0;}
     return DefWindowProcW(window,message,w,l);
 }
@@ -456,7 +527,7 @@ int main(int argc,char** argv) {
     uint32_t windowWidth=1280,windowHeight=800;
     uint32_t surfaceBudget=64,volumeBudget=32,shadowBudget=4;
     uint32_t pointBudget=65536;
-    bool stepsExplicit=false,volumeExplicit=false,pointExplicit=false,pointCpu=false;
+    bool stepsExplicit=false,volumeExplicit=false,pointExplicit=false,pointCpu=false,staticFog=false;
     render::PerformanceLightBudget lightBudget{64,32,4};
     bool patterns=false;std::string capture,preset,sceneMode="occluders",musicPath;
     render::Backend backend=render::Backend::Direct3D11;Studio s;
@@ -474,6 +545,7 @@ int main(int argc,char** argv) {
         else if(arg=="--shadow-lights"&&i+1<argc)shadowBudget=std::stoul(argv[++i]);
         else if(arg=="--point-budget"&&i+1<argc){pointBudget=std::stoul(argv[++i]);pointExplicit=true;}
         else if(arg=="--point-cpu")pointCpu=true;
+        else if(arg=="--static-fog")staticFog=true;
         else if(arg=="--smoke-box"&&i+6<argc){s.fog.local=true;s.fog.center={std::stof(argv[++i]),std::stof(argv[++i]),std::stof(argv[++i])};s.fog.halfExtent={std::stof(argv[++i]),std::stof(argv[++i]),std::stof(argv[++i])};}
         else if(arg=="--min-separation"&&i+1<argc)s.minimumSeparation=std::stof(argv[++i]);
         else if(arg=="--patterns")patterns=true;
@@ -514,6 +586,7 @@ int main(int argc,char** argv) {
     lightBudget={static_cast<uint16_t>(surfaceBudget),static_cast<uint8_t>(volumeBudget),static_cast<uint8_t>(shadowBudget)};
     if(!s.path.empty()&&!sequence::loadLightShow(s.path,data,&s.error)){std::fprintf(stderr,"%s\n",s.error.c_str());return 1;}
     s.show=sequence::CompiledLightShow::compile(std::move(data),&s.error);if(!s.show)return 2;
+    s.rebuildTimeline();
     s.player.bind(s.show);if(!s.player.seek(startTime)){std::fprintf(stderr,"Invalid --time\n");return 2;}s.player.play();
 #if defined(AY_LIGHTSHOW_AUDIO)
     if(musicPath.empty()&&!s.path.empty()&&!sequence::bundledLightShowMusic(s.path,musicPath,&s.error)){
@@ -526,6 +599,8 @@ int main(int argc,char** argv) {
     if(!musicPath.empty()){std::fprintf(stderr,"--music requires AY_ENABLE_AUDIO=ON\n");return 2;}
 #endif
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_BAR_CLASSES};InitCommonControlsEx(&controls);
+    WNDCLASSW timelineClass{};timelineClass.lpfnWndProc=timelineProcedure;timelineClass.hInstance=GetModuleHandleW(nullptr);
+    timelineClass.lpszClassName=L"AliyatLightShowTimeline";timelineClass.hCursor=LoadCursor(nullptr,IDC_HAND);RegisterClassW(&timelineClass);
     WNDCLASSW wc{};wc.lpfnWndProc=procedure;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"AliyatLightShowStudio";wc.hCursor=LoadCursor(nullptr,IDC_ARROW);RegisterClassW(&wc);
     RECT windowRect{0,0,LONG(s.width),LONG(s.height)};
     AdjustWindowRectEx(&windowRect,WS_OVERLAPPEDWINDOW|WS_CLIPCHILDREN,FALSE,0);
@@ -548,6 +623,9 @@ int main(int argc,char** argv) {
     control(window,L"BUTTON",L"Shadows on/off",ToggleShadow,299,77,135,26);
     control(window,L"BUTTON",L"Plan route",PlanRoute,718,77,130,26);
     control(window,L"BUTTON",L"Export show folder...",ExportBundle,856,77,180,26);
+    control(window,L"BUTTON",L"Animated fog on/off",ToggleFogMotion,1044,77,188,26);
+    s.timeline=CreateWindowExW(0,timelineClass.lpszClassName,L"",WS_CHILD|WS_VISIBLE,8,112,
+        int(s.width)-16,64,window,nullptr,wc.hInstance,&s);
 #if defined(AY_LIGHTSHOW_AUDIO)
     control(window,L"BUTTON",L"Music...",LoadMusic,442,77,130,26);
     control(window,L"BUTTON",L"Clear music",ClearMusic,580,77,130,26);
@@ -558,7 +636,8 @@ int main(int argc,char** argv) {
     if(!s.prepareGobos(*s.show,s.path)){std::fprintf(stderr,"%s\n",s.error.c_str());s.renderer.shutdown();DestroyWindow(window);return 4;}
     s.renderer.configurePipeline(render::RenderPipelineDesc::makeDeferred());s.renderer.setAmbientStrength(.08f);
     s.renderer.setPostProcessBloomStrength(.2f);s.renderer.setPostProcessBloomThreshold(1);s.renderer.setPostProcessExposure(1);
-    s.fog.enabled=true;s.fog.density=.015f;s.fog.steps=static_cast<uint8_t>(steps);s.fog.maxDistance=100;s.fog.anisotropy=.2f;s.renderer.setVolumetricSettings(s.fog);
+    s.fog.enabled=true;s.fog.density=.015f;s.fog.steps=static_cast<uint8_t>(steps);s.fog.maxDistance=100;s.fog.anisotropy=.2f;
+    s.fog.noiseStrength=staticFog?0.f:.35f;s.fog.noiseScale=.2f;s.renderer.setVolumetricSettings(s.fog);
     const auto cube=s.renderer.createTexturedUnitCube();const auto material=s.renderer.createMaterialFromPhoskia(render::kPbrPhoskiaSource,"light_show_stage_pbr");
     s.renderer.setMaterialColor(material,"baseColor",.3f,.32f,.36f,1);s.renderer.setMaterialFloat(material,"roughness",.65f);
     auto previous=std::chrono::steady_clock::now();
@@ -573,6 +652,7 @@ int main(int argc,char** argv) {
 #endif
             s.player.advance(frames?1.0/60:std::min(dt,.25));
         s.player.evaluate(s.frame);
+        s.fog.noiseTime=float(s.player.time());s.renderer.setVolumetricSettings(s.fog);
         const uint16_t viewHeight=s.height-toolbarHeight;
         s.renderer.setViewportRect(0,toolbarHeight,s.width,viewHeight);
         const auto eye=s.cameraMode==3?math::FVector3(10,6,-13):s.cameraMode==1?math::FVector3(16,11,-23):math::FVector3(28,24,-38);
@@ -607,6 +687,7 @@ int main(int argc,char** argv) {
 #endif
             if(!s.error.empty())title+=L" | "+std::filesystem::path(s.error).wstring();SetWindowTextW(window,title.c_str());
             SendMessageW(s.time,TBM_SETPOS,TRUE,LPARAM(s.player.time()/s.show->data().duration*1000));
+            if(s.timeline&&!s.hidden)InvalidateRect(s.timeline,nullptr,FALSE);
         }
         ++rendered;
     }

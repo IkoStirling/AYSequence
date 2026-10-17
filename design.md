@@ -25,6 +25,9 @@ schema4同时记录可插值shadowSoftness[0,4]，旧版本按零半径升级，
 Renderer桥接是可选target，Core可独立构建。Studio独立于AYEditor；启用AYAudio时
 Studio按需解码本地WAV/MP3/OGG为有界PCM Clip，以Music总线播放，并用真实Voice播放头
 同步LightShowPlayer。暂停、重启、跳转共用一个播放状态；清除音乐切回独立预览时钟。
+Studio时间轴将关键帧时间压入1024个显示桶，音乐解码后有界抽样计算1024列峰值；
+绘制成本与显示宽度相关，不随每帧的原始关键帧/PCM样本数增加。时间轴手势只定位
+播放头，关键帧数值仍经现有滑条与Add / update key写入并保留撤销历史。
 完整文件解码限制源文件128MiB、PCM 256MiB，不持久化音乐路径到.lshow；
 宿主集成仍自行提供音频时钟与延迟策略。无AYAudio构建保留静音Studio。
 手动exportLightShowBundle发布可移植文件夹，包含schema4演出、引用的图片和可选音乐；
