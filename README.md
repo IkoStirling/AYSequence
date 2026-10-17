@@ -10,6 +10,9 @@ LightShowAssetIO.h写严格schema4的.lshow JSON，读取schema1时出光口半�
 shadowSoftness[0,4]可关键帧插值，控制可选阴影边缘过滤半径。
 Studio在Renderer创建纹理并按灯具ID绑定Presenter；路径须位于.lshow文件夹或子目录。
 播放器可由外部绝对时钟同步；
+启用AYAudio构建时，Studio可用Music...选择本地WAV/MP3/OGG，音乐播放头驱动灯光；
+暂停、重启和时间拖动同步控制音乐。Clear music恢复独立预览时钟，--music可从命令行加载。
+未启用AYAudio时，Studio仍可构建和独立播放，但--music会明确报错。
 analyzeFormationClearance连续检查稳定ID编队在过渡中的最小间距，输出有界诊断。
 可选AYSequence::RendererIntegration提供LightShowPresenter；Windows的AYLightShow_Studio
 支持真实渲染预览、时间跳转、灯具关键帧、编队键、调色和保存/撤销。

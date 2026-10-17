@@ -18,8 +18,12 @@ Presenter按稳定灯具ID绑定Renderer纹理，缺少贴图的Texture键在提
 schema4同时记录可插值shadowSoftness[0,4]，旧版本按零半径升级，Renderer映射到
 单点阴影atlas的2x2过滤；这不是面积光源模拟。
 写入通过AYIO原子替换，失败保留旧输出；JSON浮点允许正常舍入，整数/枚举不得有损转换。
-Renderer桥接是可选target，Core可独立构建。Studio独立于AYEditor；外部时钟可跟随音频播放头，
-仍无内置音频传输、DMX发送和自动发布。
+Renderer桥接是可选target，Core可独立构建。Studio独立于AYEditor；启用AYAudio时
+Studio按需解码本地WAV/MP3/OGG为有界PCM Clip，以Music总线播放，并用真实Voice播放头
+同步LightShowPlayer。暂停、重启、跳转共用一个播放状态；清除音乐切回独立预览时钟。
+完整文件解码限制源文件128MiB、PCM 256MiB，不持久化音乐路径到.lshow；
+宿主集成仍自行提供音频时钟与延迟策略。无AYAudio构建保留静音Studio。
+仍无DMX发送和自动发布。
 Studio在1080p默认24积分步、12条体积光和最多10000个可见点；D3D11/D3D12支持时
 点阵走Renderer GPU实例化，--point-cpu强制回退对照。隐藏验收区分CPU墙钟与
 Renderer提供的GPU帧计时，不能把某一后端/设备测值推广为跨平台保证。

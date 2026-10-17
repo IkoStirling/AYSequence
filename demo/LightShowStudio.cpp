@@ -11,6 +11,10 @@
 #include <AYRenderer/PbrShaderSources.h>
 #include <AYSequence/LightShowPresenter.h>
 #include <AYSequence/LightShowAssetIO.h>
+#if defined(AY_LIGHTSHOW_AUDIO)
+#include <AYAudio/AudioEngine.h>
+#include <AYResource/Converter/AudioDecoder.h>
+#endif
 #include <algorithm>
 #include <chrono>
 #include <cmath>
@@ -25,8 +29,88 @@
 using namespace ayt;
 namespace {
 constexpr int toolbarHeight=112;
-enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow };
+enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic };
 struct ShowRevision { std::shared_ptr<const sequence::CompiledLightShow> show; std::string path; };
+#if defined(AY_LIGHTSHOW_AUDIO)
+// Studio-only bridge: the decoded clip's playback head is the show clock.
+// The runtime LightShowPlayer remains independent of audio and devices.
+struct MusicTransport {
+    audio::AudioEngine engine;
+    audio::AudioClipId clip=audio::InvalidClipId;
+    audio::VoiceHandle voice=audio::InvalidVoice;
+    std::string path;
+    double duration=0;
+    bool loop=false;
+    ~MusicTransport(){clear();engine.shutdown();}
+    bool loaded() const{return clip!=audio::InvalidClipId;}
+    void clear(){
+        if(voice!=audio::InvalidVoice){engine.stop(voice);voice=audio::InvalidVoice;}
+        if(clip!=audio::InvalidClipId){engine.releaseClip(clip);clip=audio::InvalidClipId;}
+        path.clear();duration=0;
+    }
+    bool load(const std::string& selected,bool repeat,double start,bool playing,std::string& error){
+        std::error_code ec;
+        const auto bytes=std::filesystem::file_size(std::filesystem::path(selected),ec);
+        if(ec||bytes>128ull*1024*1024){error="Music file is missing or exceeds 128 MiB";return false;}
+        resource::PcmBuffer pcm;
+        if(!resource::decodeAudioFile(selected,pcm)||pcm.empty()||pcm.bitsPerSample!=16
+            ||pcm.frameCount>UINT32_MAX||pcm.bytes.size()>256ull*1024*1024){
+            error="Cannot decode WAV, MP3 or OGG music (256 MiB PCM limit)";return false;
+        }
+        if(!engine.isInitialized()){
+            audio::AudioSettings settings;settings.backend=audio::AudioBackendKind::Miniaudio;
+            if(!engine.initialize(settings)){error="Cannot open the computer audio output";return false;}
+        }
+        audio::AudioClipDesc desc;desc.sampleRate=pcm.sampleRate;desc.channels=pcm.channels;
+        desc.bitsPerSample=16;desc.format=audio::AudioSampleFormat::S16;
+        desc.frameCount=static_cast<uint32_t>(pcm.frameCount);desc.pcmData=pcm.bytes.data();
+        const auto nextClip=engine.registerClip(desc);
+        if(nextClip==audio::InvalidClipId){error="Cannot register the music clip";return false;}
+        const auto nextVoice=engine.play(nextClip,audio::AudioBus::Music,{},1,repeat);
+        if(nextVoice==audio::InvalidVoice){engine.releaseClip(nextClip);error="Cannot start the music clip";return false;}
+        const auto nextDuration=double(pcm.frameCount)/pcm.sampleRate;
+        const auto frame=static_cast<uint64_t>(std::clamp(start,0.0,nextDuration)*engine.outputSampleRate());
+        engine.setVoicePositionFrames(nextVoice,frame);
+        engine.setVoicePaused(nextVoice,!playing);
+        clear();clip=nextClip;voice=nextVoice;path=selected;duration=nextDuration;loop=repeat;
+        error.clear();return true;
+    }
+    void pause(bool paused){if(voice!=audio::InvalidVoice)engine.setVoicePaused(voice,paused);}
+    void seek(double seconds){
+        if(voice!=audio::InvalidVoice){
+            const auto frame=static_cast<uint64_t>(std::clamp(seconds,0.0,duration)*engine.outputSampleRate());
+            engine.setVoicePositionFrames(voice,frame);
+        }
+    }
+    void restart(bool playing){
+        if(!loaded())return;
+        if(voice!=audio::InvalidVoice)engine.stop(voice);
+        voice=engine.play(clip,audio::AudioBus::Music,{},1,loop);
+        if(voice!=audio::InvalidVoice)engine.setVoicePaused(voice,!playing);
+    }
+    bool setLoop(bool repeat,double seconds,bool playing){
+        if(!loaded())return true;
+        if(loop==repeat){seek(seconds);pause(!playing);return true;}
+        const auto next=engine.play(clip,audio::AudioBus::Music,{},1,repeat);
+        if(next==audio::InvalidVoice)return false;
+        const auto frame=static_cast<uint64_t>(std::clamp(seconds,0.0,duration)*engine.outputSampleRate());
+        engine.setVoicePositionFrames(next,frame);engine.setVoicePaused(next,!playing);
+        if(voice!=audio::InvalidVoice)engine.stop(voice);
+        voice=next;loop=repeat;return true;
+    }
+    void tick(float dt,sequence::LightShowPlayer& player){
+        if(!loaded())return;
+        engine.submitFrame(dt);
+        audio::VoiceRuntime state;
+        if(!engine.voiceState(voice,state)||!state.playing){
+            if(player.playing()){player.synchronize(duration);player.pause();}
+            return;
+        }
+        player.synchronize(double(engine.voicePositionFrames(voice))/engine.outputSampleRate());
+        if(!player.playing())pause(true);
+    }
+};
+#endif
 struct Studio {
     render::Renderer renderer;
     sequence::LightShowPlayer player;
@@ -40,6 +124,9 @@ struct Studio {
     bool running=true,initialized=false,hidden=false;
     uint16_t width=1280,height=800;
     std::string path,error;
+#if defined(AY_LIGHTSHOW_AUDIO)
+    MusicTransport music;
+#endif
     std::unordered_map<std::string,render::TextureHandle> goboTextures;
     float minimumSeparation=.5f;
     render::VolumetricSettings fog;
@@ -95,9 +182,16 @@ struct Studio {
     }
     bool install(std::shared_ptr<const sequence::CompiledLightShow> next,bool keepHistory,const std::string& sourcePath) {
         if(!next||!prepareGobos(*next,sourcePath))return false;
+        const auto t=player.time();const bool playing=player.playing();
         if(keepHistory){undo.push_back({show,path});redo.clear();while(undo.size()>8)undo.pop_front();}
-        const auto t=player.time();const bool playing=player.playing();show=std::move(next);player.bind(show);
-        path=sourcePath;player.seek(std::min(t,show->data().duration));if(playing)player.play();targets();return true;
+        show=std::move(next);player.bind(show);
+        path=sourcePath;player.seek(std::min(t,show->data().duration));if(playing)player.play();
+#if defined(AY_LIGHTSHOW_AUDIO)
+        if(music.loaded()&&!music.setLoop(show->data().loop,player.time(),player.playing())){
+            music.clear();error="Music stopped while changing show loop mode";
+        }
+#endif
+        targets();return true;
     }
     void edit(sequence::LightShow data) {
         auto next=sequence::CompiledLightShow::compile(std::move(data),&error);
@@ -196,13 +290,57 @@ struct Studio {
         edit(std::move(data));
         if(!error.empty())MessageBoxA(window,error.c_str(),"Gobo image",MB_OK|MB_ICONWARNING);
     }
+#if defined(AY_LIGHTSHOW_AUDIO)
+    void loadMusic(){
+        wchar_t filename[32768]{};
+        OPENFILENAMEW dialog{};dialog.lStructSize=sizeof(dialog);dialog.hwndOwner=window;
+        dialog.lpstrFilter=L"Music (*.wav;*.mp3;*.ogg)\0*.wav;*.mp3;*.ogg\0\0";
+        dialog.lpstrFile=filename;dialog.nMaxFile=static_cast<DWORD>(std::size(filename));
+        dialog.Flags=OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|OFN_FILEMUSTEXIST;
+        if(!GetOpenFileNameW(&dialog))return;
+        if(!music.load(std::filesystem::path(filename).string(),show->data().loop,player.time(),player.playing(),error))
+            MessageBoxA(window,error.c_str(),"Music",MB_OK|MB_ICONWARNING);
+    }
+#endif
     void command(int id) {
         if(id==Property)updateReadout();
         if(id==ViewBoth)cameraMode=0;if(id==ViewStage)cameraMode=1;if(id==ViewSky)cameraMode=2;
-        if(id==Play){if(player.playing())player.pause();else player.play();}
-        if(id==Restart){player.stop();player.play();}
+        if(id==Play){
+            if(player.playing()){
+                player.pause();
+#if defined(AY_LIGHTSHOW_AUDIO)
+                music.pause(true);
+#endif
+            }else{
+                bool restart=!show->data().loop&&player.time()>=show->data().duration;
+#if defined(AY_LIGHTSHOW_AUDIO)
+                if(music.loaded()){
+                    audio::VoiceRuntime state;
+                    restart|=!music.engine.voiceState(music.voice,state)||!state.playing;
+                }
+#endif
+                if(restart){player.stop();player.play();
+#if defined(AY_LIGHTSHOW_AUDIO)
+                    music.restart(true);
+#endif
+                }else{player.play();
+#if defined(AY_LIGHTSHOW_AUDIO)
+                    music.pause(false);
+#endif
+                }
+            }
+        }
+        if(id==Restart){player.stop();player.play();
+#if defined(AY_LIGHTSHOW_AUDIO)
+            music.restart(true);
+#endif
+        }
         if(id==Open)file(false);if(id==Save)file(true);if(id==AddKey)key();
         if(id==LoadGobo)loadGobo();
+#if defined(AY_LIGHTSHOW_AUDIO)
+        if(id==LoadMusic)loadMusic();
+        if(id==ClearMusic)music.clear();
+#endif
         if(id==Circle)formation(false);if(id==Sphere)formation(true);
         if(id==CheckRoutes){
             sequence::FormationClearanceReport report;
@@ -247,7 +385,11 @@ LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM w,LPARAM l) {
     if(message==WM_CLOSE){s->running=false;return 0;}
     if(message==WM_COMMAND){s->command(LOWORD(w));return 0;}
     if(message==WM_SIZE){s->width=static_cast<uint16_t>(std::max(1,int(LOWORD(l))));s->height=static_cast<uint16_t>(std::max(toolbarHeight+1,int(HIWORD(l))));if(s->initialized)s->renderer.resize(s->width,s->height);return 0;}
-    if(message==WM_HSCROLL&&reinterpret_cast<HWND>(l)==s->time){s->player.pause();s->player.seek(double(SendMessageW(s->time,TBM_GETPOS,0,0))/1000*s->show->data().duration);return 0;}
+    if(message==WM_HSCROLL&&reinterpret_cast<HWND>(l)==s->time){s->player.pause();s->player.seek(double(SendMessageW(s->time,TBM_GETPOS,0,0))/1000*s->show->data().duration);
+#if defined(AY_LIGHTSHOW_AUDIO)
+        s->music.seek(s->player.time());s->music.pause(true);
+#endif
+        return 0;}
     if(message==WM_HSCROLL&&reinterpret_cast<HWND>(l)==s->value){s->updateReadout();return 0;}
     return DefWindowProcW(window,message,w,l);
 }
@@ -259,7 +401,7 @@ int main(int argc,char** argv) {
     uint32_t pointBudget=65536;
     bool stepsExplicit=false,volumeExplicit=false,pointExplicit=false,pointCpu=false;
     render::PerformanceLightBudget lightBudget{64,32,4};
-    bool patterns=false;std::string capture,preset,sceneMode="occluders";
+    bool patterns=false;std::string capture,preset,sceneMode="occluders",musicPath;
     render::Backend backend=render::Backend::Direct3D11;Studio s;
     for(int i=1;i<argc;++i) {
         const std::string arg=argv[i];
@@ -283,6 +425,7 @@ int main(int argc,char** argv) {
         else if(arg=="--time"&&i+1<argc)startTime=std::stod(argv[++i]);
         else if(arg=="--view"&&i+1<argc){const std::string view=argv[++i];s.cameraMode=view=="stage"?1:view=="sky"?2:0;}
         else if(arg=="--capture"&&i+1<argc)capture=argv[++i];
+        else if(arg=="--music"&&i+1<argc)musicPath=argv[++i];
         else if(arg=="--backend"&&i+1<argc)backend=std::string(argv[++i])=="d3d12"?render::Backend::Direct3D12:render::Backend::Direct3D11;
         else s.path=arg;
     }
@@ -315,6 +458,13 @@ int main(int argc,char** argv) {
     if(!s.path.empty()&&!sequence::loadLightShow(s.path,data,&s.error)){std::fprintf(stderr,"%s\n",s.error.c_str());return 1;}
     s.show=sequence::CompiledLightShow::compile(std::move(data),&s.error);if(!s.show)return 2;
     s.player.bind(s.show);if(!s.player.seek(startTime)){std::fprintf(stderr,"Invalid --time\n");return 2;}s.player.play();
+#if defined(AY_LIGHTSHOW_AUDIO)
+    if(!musicPath.empty()&&!s.music.load(musicPath,s.show->data().loop,s.player.time(),true,s.error)){
+        std::fprintf(stderr,"%s\n",s.error.c_str());return 2;
+    }
+#else
+    if(!musicPath.empty()){std::fprintf(stderr,"--music requires AY_ENABLE_AUDIO=ON\n");return 2;}
+#endif
     INITCOMMONCONTROLSEX controls{sizeof(controls),ICC_BAR_CLASSES};InitCommonControlsEx(&controls);
     WNDCLASSW wc{};wc.lpfnWndProc=procedure;wc.hInstance=GetModuleHandleW(nullptr);wc.lpszClassName=L"AliyatLightShowStudio";wc.hCursor=LoadCursor(nullptr,IDC_ARROW);RegisterClassW(&wc);
     RECT windowRect{0,0,LONG(s.width),LONG(s.height)};
@@ -336,6 +486,10 @@ int main(int argc,char** argv) {
     control(window,L"BUTTON",L"Gobo image...",LoadGobo,8,77,130,26);
     control(window,L"BUTTON",L"Smoke box on/off",SmokeBox,146,77,145,26);
     control(window,L"BUTTON",L"Shadows on/off",ToggleShadow,299,77,135,26);
+#if defined(AY_LIGHTSHOW_AUDIO)
+    control(window,L"BUTTON",L"Music...",LoadMusic,442,77,130,26);
+    control(window,L"BUTTON",L"Clear music",ClearMusic,580,77,130,26);
+#endif
     if(!s.hidden)ShowWindow(window,SW_SHOW);
     render::InitDesc init;init.windowHandle=window;init.width=s.width;init.height=s.height;init.vsync=false;init.msaa=0;init.backend=backend;
     if(!s.renderer.initialize(init)){DestroyWindow(window);return 4;}s.initialized=true;
@@ -351,7 +505,12 @@ int main(int argc,char** argv) {
         MSG message;while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}
         if(!s.running)break;
         const auto begin=std::chrono::steady_clock::now();const double dt=std::chrono::duration<double>(begin-previous).count();previous=begin;
-        s.player.advance(frames?1.0/60:std::min(dt,.25));s.player.evaluate(s.frame);
+#if defined(AY_LIGHTSHOW_AUDIO)
+        if(s.music.loaded())s.music.tick(float(std::min(dt,.25)),s.player);
+        else
+#endif
+            s.player.advance(frames?1.0/60:std::min(dt,.25));
+        s.player.evaluate(s.frame);
         const uint16_t viewHeight=s.height-toolbarHeight;
         s.renderer.setViewportRect(0,toolbarHeight,s.width,viewHeight);
         const auto eye=s.cameraMode==3?math::FVector3(10,6,-13):s.cameraMode==1?math::FVector3(16,11,-23):math::FVector3(28,24,-38);
@@ -381,6 +540,9 @@ int main(int argc,char** argv) {
         if(rendered%15==0&&!s.hidden) {
             const auto stats=s.renderer.performanceLightStats();
             std::wstring title=L"Aliyat Light Show Studio | "+std::to_wstring(s.player.time())+L" s | lights "+std::to_wstring(stats.surfaceDraws)+L" / "+std::to_wstring(stats.sourceLights)+L" | beams "+std::to_wstring(stats.volumeDraws)+L" | points "+std::to_wstring(s.presenter.pointStats().visible);
+#if defined(AY_LIGHTSHOW_AUDIO)
+            if(s.music.loaded())title+=L" | music "+std::filesystem::path(s.music.path).filename().wstring();
+#endif
             if(!s.error.empty())title+=L" | "+std::filesystem::path(s.error).wstring();SetWindowTextW(window,title.c_str());
             SendMessageW(s.time,TBM_SETPOS,TRUE,LPARAM(s.player.time()/s.show->data().duration*1000));
         }
@@ -396,13 +558,18 @@ int main(int argc,char** argv) {
         const double gpuP95=gpuTimings.empty()?0:gpuTimings[size_t((gpuTimings.size()-1)*.95)];
         const auto stats=s.renderer.performanceLightStats();
         const auto pointStats=s.presenter.pointStats();
-        std::printf("{\"samples\":%zu,\"gpuSamples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"meanGpuMs\":%.4f,\"p95GpuMs\":%.4f,\"meanPresenterMs\":%.4f,\"meanRenderMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u,\"instancedPoints\":%s}\n",
+        double musicTime=0;bool musicLoaded=false;
+#if defined(AY_LIGHTSHOW_AUDIO)
+        musicLoaded=s.music.loaded();
+        if(musicLoaded)musicTime=double(s.music.engine.voicePositionFrames(s.music.voice))/s.music.engine.outputSampleRate();
+#endif
+        std::printf("{\"samples\":%zu,\"gpuSamples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"meanGpuMs\":%.4f,\"p95GpuMs\":%.4f,\"meanPresenterMs\":%.4f,\"meanRenderMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u,\"instancedPoints\":%s,\"showTimeSeconds\":%.4f,\"musicTimeSeconds\":%.4f,\"musicLoaded\":%s}\n",
             timings.size(),gpuTimings.size(),s.width,s.height-toolbarHeight,
             sum/timings.size(),timings[size_t((timings.size()-1)*.95)],gpuMean,gpuP95,
             presenterSum/presenterTimings.size(),renderSum/renderTimings.size(),
             stats.surfaceDraws,stats.volumeDraws,stats.volumeBudgetSkipped,
             pointStats.source,pointStats.visible,pointStats.budgetSkipped,
-            pointStats.instanced?"true":"false");
+            pointStats.instanced?"true":"false",s.player.time(),musicTime,musicLoaded?"true":"false");
     }
     s.presenter.clearGoboTextures();
     for(auto& [name,texture]:s.goboTextures)s.renderer.destroyTexture(texture);
