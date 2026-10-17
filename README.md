@@ -16,6 +16,9 @@ Studio在Renderer创建纹理并按灯具ID绑定Presenter；路径须位于.lsh
 analyzeFormationClearance连续检查稳定ID编队在过渡中的最小间距，输出有界诊断。
 planFormationTransition可为发生交叉的一段编队插入中间高度键，并再次连续检查间距；
 Studio的Plan route按钮对当前时间所在段使用该功能。规划失败不会改写演出。
+AssetIO的exportLightShowBundle把已保存演出、实际引用的Gobo图片和可选音乐复制到新建的
+.lshowpkg文件夹，写bundle.json；缺少素材或超过单文件128MiB/总计512MiB时清理新文件夹。
+Studio的Export show folder...导出当前节目，打开包内.lshow时自动读取包内音乐（需AYAudio）。
 可选AYSequence::RendererIntegration提供LightShowPresenter；Windows的AYLightShow_Studio
 支持真实渲染预览、时间跳转、灯具关键帧、编队键、调色和保存/撤销。
 角度编辑以度显示，数据为弧度；--steps 8..64控制积分上限，低分辨率默认48，

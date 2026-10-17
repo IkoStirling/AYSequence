@@ -4,6 +4,7 @@
 #include <AYTestFixtures.h>
 #include <algorithm>
 #include <cmath>
+#include <fstream>
 #include <limits>
 
 using namespace ayt::sequence;
@@ -256,5 +257,34 @@ TEST_CASE(atomic_file_publication_preserves_previous_file_on_invalid_edit) {
     data.duration=-1;CHECK(!saveLightShow(path,data));CHECK(loadLightShow(path,copy));CHECK(copy.duration==4);
     CHECK(!saveLightShow(path+".json",showFixture()));CHECK(!loadLightShow(path+".missing",copy));
     std::string bytes="old";CHECK(!encodeLightShow(data,bytes));CHECK(bytes=="old");
+}
+TEST_CASE(bundle_copies_referenced_images_and_music_for_reopening) {
+    ayt::test::ScratchDirectory scratch("light-show-bundle");
+    const auto root=scratch.path(),showPath=root/"show.lshow",music=root/"song.ogg",bundle=root/"export";
+    std::filesystem::create_directory(root/"gobos");
+    {std::ofstream image(root/"gobos"/"star.png",std::ios::binary);image<<"image";}
+    {std::ofstream audio(music,std::ios::binary);audio<<"music";}
+    auto show=showFixture();show.fixtures[0].goboTexturePath="gobos/star.png";
+    show.fixtures[0].keys[0].value.gobo=ShowGobo::Texture;
+    CHECK(saveLightShow(showPath.string(),show));
+    std::string error,packagedMusic="unchanged";
+    CHECK(exportLightShowBundle(showPath.string(),bundle.string(),music.string(),&error));
+    CHECK(error.empty());CHECK(std::filesystem::exists(bundle/"show.lshow"));
+    CHECK(std::filesystem::exists(bundle/"gobos"/"star.png"));
+    LightShow reopened;CHECK(loadLightShow((bundle/"show.lshow").string(),reopened));
+    CHECK(bundledLightShowMusic((bundle/"show.lshow").string(),packagedMusic,&error));
+    CHECK(std::filesystem::path(packagedMusic)==std::filesystem::canonical(bundle/"__music"/"track.ogg"));
+    CHECK(!exportLightShowBundle(showPath.string(),bundle.string(),music.string(),&error));
+    CHECK(std::filesystem::exists(bundle/"show.lshow"));
+}
+TEST_CASE(bundle_rejects_missing_assets_without_publishing) {
+    ayt::test::ScratchDirectory scratch("light-show-bundle-missing");
+    const auto root=scratch.path(),showPath=root/"show.lshow",bundle=root/"export";
+    auto show=showFixture();show.fixtures[0].goboTexturePath="missing.png";
+    show.fixtures[0].keys[0].value.gobo=ShowGobo::Texture;
+    CHECK(saveLightShow(showPath.string(),show));std::string error,music="keep";
+    CHECK(!exportLightShowBundle(showPath.string(),bundle.string(),{},&error));
+    CHECK(!std::filesystem::exists(bundle));
+    CHECK(bundledLightShowMusic(showPath.string(),music,&error));CHECK(music.empty());
 }
 TEST_SUITE_END

@@ -29,7 +29,7 @@
 using namespace ayt;
 namespace {
 constexpr int toolbarHeight=112;
-enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute };
+enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle };
 struct ShowRevision { std::shared_ptr<const sequence::CompiledLightShow> show; std::string path; };
 #if defined(AY_LIGHTSHOW_AUDIO)
 // Studio-only bridge: the decoded clip's playback head is the show clock.
@@ -265,7 +265,44 @@ struct Studio {
             }
             if(sequence::saveLightShow(selected,show->data(),&error)&&prepareGobos(*show,selected))path=selected;
         }
-        else {sequence::LightShow data;if(sequence::loadLightShow(selected,data,&error))install(sequence::CompiledLightShow::compile(std::move(data)),true,selected);}
+        else {
+            sequence::LightShow data;std::string packagedMusic;
+            if(!sequence::loadLightShow(selected,data,&error)||!sequence::bundledLightShowMusic(selected,packagedMusic,&error)){
+                MessageBoxA(window,error.c_str(),"Open light show",MB_OK|MB_ICONWARNING);return;
+            }
+            if(!install(sequence::CompiledLightShow::compile(std::move(data)),true,selected)){
+                MessageBoxA(window,error.c_str(),"Open light show",MB_OK|MB_ICONWARNING);return;
+            }
+#if defined(AY_LIGHTSHOW_AUDIO)
+            music.clear();
+            if(!packagedMusic.empty()&&!music.load(packagedMusic,show->data().loop,player.time(),player.playing(),error))
+                MessageBoxA(window,error.c_str(),"Packaged music",MB_OK|MB_ICONWARNING);
+#endif
+        }
+    }
+    void exportBundle(){
+        if(path.empty()){
+            MessageBoxW(window,L"Save the .lshow file before exporting.",L"Export show folder",MB_OK|MB_ICONINFORMATION);return;
+        }
+        wchar_t filename[32768]{};
+        OPENFILENAMEW dialog{};dialog.lStructSize=sizeof(dialog);dialog.hwndOwner=window;
+        dialog.lpstrFilter=L"Light show package folder (*.lshowpkg)\0*.lshowpkg\0\0";
+        dialog.lpstrFile=filename;dialog.nMaxFile=static_cast<DWORD>(std::size(filename));
+        dialog.lpstrDefExt=L"lshowpkg";dialog.Flags=OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST;
+        if(!GetSaveFileNameW(&dialog))return;
+        const auto destination=std::filesystem::path(filename).string();
+        if(!sequence::saveLightShow(path,show->data(),&error)){
+            MessageBoxA(window,error.c_str(),"Export show folder",MB_OK|MB_ICONWARNING);return;
+        }
+        std::string musicPath;
+#if defined(AY_LIGHTSHOW_AUDIO)
+        if(music.loaded())musicPath=music.path;
+#endif
+        if(!sequence::exportLightShowBundle(path,destination,musicPath,&error)){
+            MessageBoxA(window,error.c_str(),"Export show folder",MB_OK|MB_ICONWARNING);return;
+        }
+        const auto message=L"Show folder created at:\n"+std::filesystem::path(destination).wstring();
+        MessageBoxW(window,message.c_str(),L"Export show folder",MB_OK|MB_ICONINFORMATION);
     }
     void loadGobo() {
         if(path.empty()){MessageBoxW(window,L"Save the .lshow file first.",L"Gobo image",MB_OK|MB_ICONINFORMATION);return;}
@@ -335,7 +372,7 @@ struct Studio {
             music.restart(true);
 #endif
         }
-        if(id==Open)file(false);if(id==Save)file(true);if(id==AddKey)key();
+        if(id==Open)file(false);if(id==Save)file(true);if(id==ExportBundle)exportBundle();if(id==AddKey)key();
         if(id==LoadGobo)loadGobo();
 #if defined(AY_LIGHTSHOW_AUDIO)
         if(id==LoadMusic)loadMusic();
@@ -479,6 +516,9 @@ int main(int argc,char** argv) {
     s.show=sequence::CompiledLightShow::compile(std::move(data),&s.error);if(!s.show)return 2;
     s.player.bind(s.show);if(!s.player.seek(startTime)){std::fprintf(stderr,"Invalid --time\n");return 2;}s.player.play();
 #if defined(AY_LIGHTSHOW_AUDIO)
+    if(musicPath.empty()&&!s.path.empty()&&!sequence::bundledLightShowMusic(s.path,musicPath,&s.error)){
+        std::fprintf(stderr,"%s\n",s.error.c_str());return 2;
+    }
     if(!musicPath.empty()&&!s.music.load(musicPath,s.show->data().loop,s.player.time(),true,s.error)){
         std::fprintf(stderr,"%s\n",s.error.c_str());return 2;
     }
@@ -507,6 +547,7 @@ int main(int argc,char** argv) {
     control(window,L"BUTTON",L"Smoke box on/off",SmokeBox,146,77,145,26);
     control(window,L"BUTTON",L"Shadows on/off",ToggleShadow,299,77,135,26);
     control(window,L"BUTTON",L"Plan route",PlanRoute,718,77,130,26);
+    control(window,L"BUTTON",L"Export show folder...",ExportBundle,856,77,180,26);
 #if defined(AY_LIGHTSHOW_AUDIO)
     control(window,L"BUTTON",L"Music...",LoadMusic,442,77,130,26);
     control(window,L"BUTTON",L"Clear music",ClearMusic,580,77,130,26);

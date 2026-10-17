@@ -27,7 +27,9 @@ Studio按需解码本地WAV/MP3/OGG为有界PCM Clip，以Music总线播放，�
 同步LightShowPlayer。暂停、重启、跳转共用一个播放状态；清除音乐切回独立预览时钟。
 完整文件解码限制源文件128MiB、PCM 256MiB，不持久化音乐路径到.lshow；
 宿主集成仍自行提供音频时钟与延迟策略。无AYAudio构建保留静音Studio。
-仍无DMX发送和自动发布。
+手动exportLightShowBundle发布可移植文件夹，包含schema4演出、引用的图片和可选音乐；
+只接受新目的文件夹，失败删除本次创建的目录。manifest仅记录相对音乐路径，读取时校验
+路径边界；不改动.lshow格式或把音乐编入运行时快照。仍无DMX发送和ProjectBuild自动发布。
 Studio在1080p默认24积分步、12条体积光和最多10000个可见点；D3D11/D3D12支持时
 点阵走Renderer GPU实例化，--point-cpu强制回退对照。隐藏验收区分CPU墙钟与
 Renderer提供的GPU帧计时，不能把某一后端/设备测值推广为跨平台保证。
