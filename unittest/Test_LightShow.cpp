@@ -88,6 +88,39 @@ TEST_CASE(formation_clearance_detects_between_frame_crossings_and_bounds_work) {
     CHECK(show->analyzeFormationClearance(.5f,100,10,report));
     CHECK(report.conflicts.empty());
 }
+TEST_CASE(formation_route_planner_detours_crossings_and_preserves_output_on_failure) {
+    auto crossing=showFixture();
+    ShowPoint a,b;a.id=1;b.id=2;
+    a.position={-2,0,0};b.position={2,0,0};
+    crossing.formations[0].points={a,b};
+    a.position={2,0,0};b.position={-2,0,0};
+    crossing.formations[1].points={a,b};
+    LightShow planned;std::string error;
+    CHECK(planFormationTransition(crossing,0,{},planned,&error));CHECK(error.empty());
+    CHECK(planned.formations.size()==3);CHECK(planned.formations[1].time==2);
+    CHECK(planned.formations[1].points[0].id==1);
+    auto compiled=CompiledLightShow::compile(planned);CHECK(compiled!=nullptr);
+    FormationClearanceReport report;
+    CHECK(compiled->analyzeFormationClearance(.5f,100,10,report));
+    CHECK(report.complete);CHECK(report.conflicts.empty());
+    LightShow same;CHECK(planFormationTransition(planned,0,{},same,&error));
+    CHECK(same.formations.size()==planned.formations.size());
+
+    const auto previous=planned.formations.size();
+    FormationRouteOptions tooLow;tooLow.maxVerticalDetour=.1f;
+    CHECK(!planFormationTransition(crossing,0,tooLow,planned,&error));
+    CHECK(planned.formations.size()==previous);CHECK(!error.empty());
+    CHECK(!planFormationTransition(crossing,3,{},planned,&error));
+    CHECK(planned.formations.size()==previous);
+    CHECK(!planFormationTransition(crossing,std::numeric_limits<std::size_t>::max(),{},planned,&error));
+    CHECK(planned.formations.size()==previous);
+    crossing.formations[0].points[1].position=crossing.formations[0].points[0].position;
+    CHECK(!planFormationTransition(crossing,0,{},planned,&error));
+    CHECK(planned.formations.size()==previous);
+    crossing.formations[0].interpolation=ShowInterpolation::Step;
+    CHECK(!planFormationTransition(crossing,0,{},planned,&error));
+    CHECK(planned.formations.size()==previous);
+}
 TEST_CASE(invalid_input_and_evaluation_preserve_existing_state) {
     auto data=showFixture();auto show=CompiledLightShow::compile(data);LightShowFrame frame;
     show->evaluate(2,frame);CHECK(!show->evaluate(-1,frame));CHECK(frame.time==2);

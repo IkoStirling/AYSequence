@@ -14,6 +14,8 @@ Studio在Renderer创建纹理并按灯具ID绑定Presenter；路径须位于.lsh
 暂停、重启和时间拖动同步控制音乐。Clear music恢复独立预览时钟，--music可从命令行加载。
 未启用AYAudio时，Studio仍可构建和独立播放，但--music会明确报错。
 analyzeFormationClearance连续检查稳定ID编队在过渡中的最小间距，输出有界诊断。
+planFormationTransition可为发生交叉的一段编队插入中间高度键，并再次连续检查间距；
+Studio的Plan route按钮对当前时间所在段使用该功能。规划失败不会改写演出。
 可选AYSequence::RendererIntegration提供LightShowPresenter；Windows的AYLightShow_Studio
 支持真实渲染预览、时间跳转、灯具关键帧、编队键、调色和保存/撤销。
 角度编辑以度显示，数据为弧度；--steps 8..64控制积分上限，低分辨率默认48，

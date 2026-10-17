@@ -88,6 +88,16 @@ struct FormationClearanceReport {
     bool complete = true;
 };
 
+struct FormationRouteOptions {
+    /// Required continuous center separation, in show world units.
+    float minimumDistance = 0.5f;
+    /// Maximum upward detour added at the inserted middle key.
+    float maxVerticalDetour = 20.0f;
+    /// Offline diagnostic budgets. Exhaustion fails without modifying output.
+    std::size_t maxPairChecks = 2000000;
+    std::size_t maxConflicts = 65536;
+};
+
 /// Immutable validated performance data, independent of Renderer/World/audio.
 /// Compile canonicalizes formation points by stable ID; all formations must
 /// contain the same IDs. Bounds: 256 fixtures, 65536 points, 1M total samples,
@@ -115,6 +125,17 @@ private:
     explicit CompiledLightShow(LightShow data) : _data(std::move(data)) {}
     LightShow _data;
 };
+
+/// Insert one middle formation key for a conflicting transition, assigning
+/// deterministic altitude lanes by stable point ID. All resulting linear
+/// segments are checked continuously against minimumDistance before output
+/// is replaced. Existing endpoint overlap, exhausted budgets, or an
+/// unsolved route returns false without changing output. This plans only
+/// a visual transition; it does not account for acceleration, obstacles,
+/// physical aircraft limits, or real-world flight safety.
+bool planFormationTransition(const LightShow& source, std::size_t fromKeyIndex,
+                             FormationRouteOptions options, LightShow& output,
+                             std::string* error = nullptr);
 
 /// One explicit clock owner. Pause holds the current frame; seek is valid while
 /// paused, loop wraps, once holds the endpoint. No wall clock or implicit tick.

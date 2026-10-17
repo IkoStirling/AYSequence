@@ -29,7 +29,7 @@
 using namespace ayt;
 namespace {
 constexpr int toolbarHeight=112;
-enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic };
+enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute };
 struct ShowRevision { std::shared_ptr<const sequence::CompiledLightShow> show; std::string path; };
 #if defined(AY_LIGHTSHOW_AUDIO)
 // Studio-only bridge: the decoded clip's playback head is the show clock.
@@ -357,6 +357,26 @@ struct Studio {
                 MessageBoxW(window,message,L"Formation clearance",MB_OK|MB_ICONINFORMATION);
             }
         }
+        if(id==PlanRoute){
+            const auto& formations=show->data().formations;
+            if(formations.size()<2){MessageBoxW(window,L"Add two formation keys before planning a route.",L"Formation route",MB_OK|MB_ICONINFORMATION);}
+            else{
+                const auto next=std::upper_bound(formations.begin(),formations.end(),player.time(),
+                    [](double time,const auto& key){return time<key.time;});
+                const auto index=std::min(formations.size()-2,
+                    next==formations.begin()?size_t(0):size_t(next-formations.begin()-1));
+                sequence::LightShow planned;std::string diagnostic;
+                sequence::FormationRouteOptions options;options.minimumDistance=minimumSeparation;
+                if(sequence::planFormationTransition(show->data(),index,options,planned,&diagnostic)){
+                    const bool changed=planned.formations.size()!=formations.size();
+                    error.clear();if(changed)edit(std::move(planned));
+                    if(!error.empty())MessageBoxA(window,error.c_str(),"Formation route",MB_OK|MB_ICONWARNING);
+                    else MessageBoxW(window,changed?L"A continuously checked detour was added."
+                        :L"This transition already meets the selected separation.",
+                        L"Formation route",MB_OK|MB_ICONINFORMATION);
+                }else MessageBoxA(window,diagnostic.c_str(),"Formation route",MB_OK|MB_ICONWARNING);
+            }
+        }
         if(id==Palette){auto data=show->data();for(auto& key:data.formations)for(auto& p:key.points)std::rotate(p.color.begin(),p.color.begin()+1,p.color.end());edit(std::move(data));}
         if(id==SmokeBox){fog.local=!fog.local;if(initialized)renderer.setVolumetricSettings(fog);}
         if(id==ToggleShadow){
@@ -486,6 +506,7 @@ int main(int argc,char** argv) {
     control(window,L"BUTTON",L"Gobo image...",LoadGobo,8,77,130,26);
     control(window,L"BUTTON",L"Smoke box on/off",SmokeBox,146,77,145,26);
     control(window,L"BUTTON",L"Shadows on/off",ToggleShadow,299,77,135,26);
+    control(window,L"BUTTON",L"Plan route",PlanRoute,718,77,130,26);
 #if defined(AY_LIGHTSHOW_AUDIO)
     control(window,L"BUTTON",L"Music...",LoadMusic,442,77,130,26);
     control(window,L"BUTTON",L"Clear music",ClearMusic,580,77,130,26);

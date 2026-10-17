@@ -3,6 +3,7 @@
 #include <cmath>
 #include <numbers>
 #include <filesystem>
+#include <unordered_map>
 #include <unordered_set>
 
 namespace ayt::sequence {
@@ -223,6 +224,96 @@ bool CompiledLightShow::analyzeFormationClearance(float minimumDistance,
     }
     output = std::move(result);
     return true;
+}
+
+bool planFormationTransition(const LightShow& source, std::size_t fromKeyIndex,
+                             FormationRouteOptions options, LightShow& output,
+                             std::string* error) {
+    const auto fail=[&](const char* message){if(error)*error=message;return false;};
+    if(!std::isfinite(options.minimumDistance)||options.minimumDistance<=0
+        ||!std::isfinite(options.maxVerticalDetour)||options.maxVerticalDetour<=0
+        ||options.maxVerticalDetour>100000
+        ||!options.maxPairChecks||!options.maxConflicts)
+        return fail("Invalid formation route options");
+    auto compiled=CompiledLightShow::compile(source,error);
+    if(!compiled)return false;
+    const auto& data=compiled->data();
+    if(fromKeyIndex>=data.formations.size()||fromKeyIndex+1>=data.formations.size())
+        return fail("Formation transition index is out of range");
+    const auto& from=data.formations[fromKeyIndex];
+    const auto& to=data.formations[fromKeyIndex+1];
+    if(from.interpolation==ShowInterpolation::Step)
+        return fail("Step transition has no continuous route to plan");
+    const double middleTime=from.time+(to.time-from.time)*.5;
+    if(!(middleTime>from.time&&middleTime<to.time))
+        return fail("Formation transition is too short for a middle key");
+
+    LightShow preview;preview.duration=data.duration;preview.formations={from,to};
+    const auto inspect=[&](const LightShow& show,FormationClearanceReport& report){
+        auto snapshot=CompiledLightShow::compile(show,error);
+        return snapshot&&snapshot->analyzeFormationClearance(options.minimumDistance,
+            options.maxPairChecks,options.maxConflicts,report)&&report.complete;
+    };
+    FormationClearanceReport report;
+    if(!inspect(preview,report))return fail("Formation route diagnostic budget was exhausted");
+    if(report.conflicts.empty()){output=data;if(error)error->clear();return true;}
+    const auto atEndpoint=[&](const FormationClearanceReport& value){
+        return std::any_of(value.conflicts.begin(),value.conflicts.end(),[&](const auto& conflict){
+            return std::abs(conflict.time-from.time)<1e-7
+                ||std::abs(conflict.time-to.time)<1e-7;
+        });
+    };
+    if(atEndpoint(report))return fail("Formation endpoint points are already too close");
+
+    const auto count=from.points.size();
+    std::unordered_map<std::uint32_t,std::size_t> index;
+    index.reserve(count);
+    for(std::size_t i=0;i<count;++i)index.emplace(from.points[i].id,i);
+    std::vector<std::vector<std::size_t>> neighbors(count);
+    const auto addConflicts=[&](const FormationClearanceReport& value){
+        for(const auto& conflict:value.conflicts){
+            const auto a=index.at(conflict.firstId),b=index.at(conflict.secondId);
+            if(std::find(neighbors[a].begin(),neighbors[a].end(),b)==neighbors[a].end()){
+                neighbors[a].push_back(b);neighbors[b].push_back(a);
+            }
+        }
+    };
+    addConflicts(report);
+    for(int pass=0;pass<8;++pass){
+        std::vector<int> colors(count,-1),used(count,-1);
+        for(std::size_t i=0;i<count;++i){
+            if(neighbors[i].empty())continue;
+            for(const auto neighbor:neighbors[i])if(colors[neighbor]>=0)used[colors[neighbor]]=static_cast<int>(i);
+            int color=0;while(used[color]==static_cast<int>(i))++color;
+            colors[i]=color;
+        }
+        FormationKey middle;middle.time=middleTime;middle.interpolation=ShowInterpolation::Linear;
+        middle.points=from.points;
+        const float laneSpacing=options.minimumDistance*1.25f*float(1u<<pass);
+        bool heightExceeded=false;
+        for(std::size_t i=0;i<count;++i){
+            for(int axis=0;axis<3;++axis)
+                middle.points[i].position[axis]=.5f*(from.points[i].position[axis]+to.points[i].position[axis]);
+            if(colors[i]<0)continue;
+            const float lift=(colors[i]+1)*laneSpacing;
+            if(lift>options.maxVerticalDetour||middle.points[i].position[1]+lift>100000){heightExceeded=true;break;}
+            middle.points[i].position[1]+=lift;
+        }
+        if(heightExceeded)break;
+        preview.formations={from,middle,to};
+        preview.formations[0].interpolation=ShowInterpolation::Linear;
+        if(!inspect(preview,report))return fail("Formation route diagnostic budget was exhausted");
+        if(report.conflicts.empty()){
+            LightShow planned=data;
+            planned.formations[fromKeyIndex].interpolation=ShowInterpolation::Linear;
+            planned.formations.insert(planned.formations.begin()+fromKeyIndex+1,std::move(middle));
+            if(!CompiledLightShow::compile(planned,error))return false;
+            output=std::move(planned);if(error)error->clear();return true;
+        }
+        if(atEndpoint(report))return fail("Formation endpoint points are already too close");
+        addConflicts(report);
+    }
+    return fail("No continuously separated route fits the vertical detour budget");
 }
 void LightShowPlayer::bind(std::shared_ptr<const CompiledLightShow> show) {
     _show = std::move(show); _time = 0; _playing = false;
