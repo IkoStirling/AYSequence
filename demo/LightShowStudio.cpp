@@ -664,6 +664,10 @@ int main(int argc,char** argv) {
         else if(arg=="--frames"&&i+1<argc)frames=std::stoul(argv[++i]);
         else if(arg=="--points"&&i+1<argc)points=std::stoul(argv[++i]);
         else if(arg=="--fixtures"&&i+1<argc)fixtures=std::stoul(argv[++i]);
+        else if(arg=="--froxel")s.fog.froxel=true;
+        else if(arg=="--froxel-tile"&&i+1<argc){const auto value=std::stoul(argv[++i]);if(value!=4&&value!=8&&value!=16)return 2;s.fog.froxelTileSize=uint8_t(value);}
+        else if(arg=="--froxel-slices"&&i+1<argc){const auto value=std::stoul(argv[++i]);if(value!=16&&value!=32&&value!=64)return 2;s.fog.froxelSlices=uint8_t(value);}
+        else if(arg=="--froxel-budget"&&i+1<argc){const auto value=std::stoul(argv[++i]);if(value<65536||value>4194304)return 2;s.fog.froxelMaxCells=uint32_t(value);}
         else if(arg=="--fog-resolution"&&i+1<argc){const auto value=std::stoul(argv[++i]);if(value!=1&&value!=2&&value!=4)return 2;s.fog.downsample=uint8_t(value);}
         else if(arg=="--steps"&&i+1<argc){steps=std::stoul(argv[++i]);stepsExplicit=true;}
         else if(arg=="--width"&&i+1<argc)windowWidth=std::stoul(argv[++i]);
@@ -952,13 +956,13 @@ int main(int argc,char** argv) {
         musicLoaded=s.music.loaded();
         if(musicLoaded)musicTime=double(s.music.engine.voicePositionFrames(s.music.voice))/s.music.engine.outputSampleRate();
 #endif
-        std::printf("{\"samples\":%zu,\"gpuSamples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"meanGpuMs\":%.4f,\"p95GpuMs\":%.4f,\"meanPresenterMs\":%.4f,\"meanRenderMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u,\"instancedPoints\":%s,\"showTimeSeconds\":%.4f,\"musicTimeSeconds\":%.4f,\"musicLoaded\":%s,\"pointLightCells\":%u,\"pointLights\":%u,\"pointLightBudgetSkipped\":%u,\"emitterPrepared\":%u,\"emitterBackFacing\":%u,\"emitterClamped\":%u,\"transparentLightDraws\":%u,\"transparentLightBudgetSkipped\":%u,\"transparentUnsupportedMaterials\":%u,\"fogResolution\":%u,\"gpuProfiling\":%s,\"meanVolumeGpuMs\":%.4f,\"meanLightingGpuMs\":%.4f,\"meanShadowGpuMs\":%.4f,\"rigidInstancedDraws\":%u,\"rigidInstancedObjects\":%u}\n",
+        std::printf("{\"samples\":%zu,\"gpuSamples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"meanGpuMs\":%.4f,\"p95GpuMs\":%.4f,\"meanPresenterMs\":%.4f,\"meanRenderMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u,\"instancedPoints\":%s,\"showTimeSeconds\":%.4f,\"musicTimeSeconds\":%.4f,\"musicLoaded\":%s,\"pointLightCells\":%u,\"pointLights\":%u,\"pointLightBudgetSkipped\":%u,\"emitterPrepared\":%u,\"emitterBackFacing\":%u,\"emitterClamped\":%u,\"transparentLightDraws\":%u,\"transparentLightBudgetSkipped\":%u,\"transparentUnsupportedMaterials\":%u,\"fogResolution\":%u,\"gpuProfiling\":%s,\"meanVolumeGpuMs\":%.4f,\"meanLightingGpuMs\":%.4f,\"meanShadowGpuMs\":%.4f,\"rigidInstancedDraws\":%u,\"rigidInstancedObjects\":%u,\"froxel\":%s,\"froxelWidth\":%u,\"froxelHeight\":%u,\"froxelSlices\":%u,\"froxelCells\":%u}\n",
             timings.size(),gpuTimings.size(),s.width,s.height-toolbarHeight,
             sum/timings.size(),timings[size_t((timings.size()-1)*.95)],gpuMean,gpuP95,
             presenterSum/presenterTimings.size(),renderSum/renderTimings.size(),
             stats.surfaceDraws,stats.volumeDraws,stats.volumeBudgetSkipped,
             pointStats.source,pointStats.visible,pointStats.budgetSkipped,
-            pointStats.instanced?"true":"false",s.player.time(),musicTime,musicLoaded?"true":"false",aggregate.occupiedCells,aggregate.selectedLights,aggregate.budgetSkipped,emitters.prepared,emitters.backFacing,emitters.clamped,stats.transparentDraws,stats.transparentBudgetSkipped,stats.transparentUnsupportedMaterials,unsigned(s.fog.downsample),profileGpu?"true":"false",gpuPassTotals["Volumetric"]/std::max<size_t>(1,gpuTimings.size()),gpuPassTotals["Lighting"]/std::max<size_t>(1,gpuTimings.size()),gpuPassTotals["Shadow"]/std::max<size_t>(1,gpuTimings.size()),s.renderer.getFrameStats().instancedDrawCalls,s.renderer.getFrameStats().instancedObjects);
+            pointStats.instanced?"true":"false",s.player.time(),musicTime,musicLoaded?"true":"false",aggregate.occupiedCells,aggregate.selectedLights,aggregate.budgetSkipped,emitters.prepared,emitters.backFacing,emitters.clamped,stats.transparentDraws,stats.transparentBudgetSkipped,stats.transparentUnsupportedMaterials,unsigned(s.fog.downsample),profileGpu?"true":"false",gpuPassTotals["Volumetric"]/std::max<size_t>(1,gpuTimings.size()),gpuPassTotals["Lighting"]/std::max<size_t>(1,gpuTimings.size()),gpuPassTotals["Shadow"]/std::max<size_t>(1,gpuTimings.size()),s.renderer.getFrameStats().instancedDrawCalls,s.renderer.getFrameStats().instancedObjects,s.renderer.getFrameStats().volumetric.froxel?"true":"false",unsigned(s.renderer.getFrameStats().volumetric.integrationWidth),unsigned(s.renderer.getFrameStats().volumetric.integrationHeight),unsigned(s.renderer.getFrameStats().volumetric.depthSlices),s.renderer.getFrameStats().volumetric.froxelCells);
     }
     s.presenter.clearGoboTextures();
     for(auto& [name,asset]:s.iesAssets)s.renderer.destroyTexture(asset.texture);

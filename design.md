@@ -352,3 +352,11 @@ Studio --fog-resolution 1|2|4 选择原始、每轴半分辨率、每轴四分�
 以及rigidInstancedDraws/rigidInstancedObjects；未启用/不支持分项为0。
 后者是本帧所有相关Pass的实例提交数（包含阴影重复），不是去重灯具数。
 灯壳按共享部件连续提交，保留原矩阵并减少GBuffer/Shadow逐对象提交。
+
+
+## 2026-10-19 froxel 预览
+
+Studio --froxel启用Renderer有界网格，--froxel-tile 4|8|16、--froxel-slices 16|32|64、
+--froxel-budget 65536..4194304控制质量/内存。默认仍原ray路径，schema7不变。
+性能JSON的froxel/froxelWidth/Height/Slices/Cells来自实际本帧统计，包括设备回退与预算收缩。
+--fog-resolution只影响ray路径；网格是单散射中心采样，暂无独立历史，不能保证细光束无闪烁。
