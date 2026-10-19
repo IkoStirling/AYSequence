@@ -366,3 +366,9 @@ Studio --froxel启用Renderer有界网格，--froxel-tile 4|8|16、--froxel-slic
 --froxel-budget 65536..4194304控制质量/内存。默认仍原ray路径，schema7不变。
 性能JSON的froxel/froxelWidth/Height/Slices/Cells来自实际本帧统计，包括设备回退与预算收缩。
 --fog-resolution只影响ray路径；网格是单散射中心采样，暂无独立历史，不能保证细光束无闪烁。
+
+
+## 2026-10-20 体积历史预览
+
+--froxel-history同时启用网格与独立系数历史；volumeHistoryUsed报告实际帧级资格。
+时间拖动调用resetVolumetricHistory，默认仍关闭，无.lshow格式变化。
