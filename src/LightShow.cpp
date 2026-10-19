@@ -1,4 +1,5 @@
 #include "LightShowFogInternal.h"
+#include "LightShowStrobeInternal.h"
 #include <AYSequence/LightShow.h>
 #include <algorithm>
 #include <cmath>
@@ -156,6 +157,23 @@ bool CompiledLightShow::evaluate(double time, LightShowFrame& out, bool procedur
         const auto& p = from.points[i]; const auto& q = to.points[i];
         out.points[i] = {p.id,mix(p.position,q.position,t),mix(p.color,q.color,t),
             mix(p.intensity,q.intensity,t),mix(p.radius,q.radius,t)};
+    }
+    return true;
+}
+
+bool CompiledLightShow::evaluateShutter(double time, double shutterSeconds, LightShowFrame& out) const {
+    if (!std::isfinite(shutterSeconds) || shutterSeconds < 0 || shutterSeconds > 1
+        || !std::isfinite(time) || time < 0 || time > _data.duration) return false;
+    if (shutterSeconds == 0) return evaluate(time,out);
+    evaluate(time,out,false);
+    for (std::size_t i=0;i<_data.fixtures.size();++i) {
+        const auto& track=_data.fixtures[i]; auto& state=out.fixtures[i].value;
+        const double phase=tau*track.sweepFrequency*time+track.phase;
+        state.pan+=track.sweepPan*static_cast<float>(std::sin(phase));
+        state.tilt+=track.sweepTilt*static_cast<float>(std::cos(phase));
+        state.intensity*=static_cast<float>(detail::strobeShowExposureAverage(
+            track.strobeFrequency,track.strobeDuty,track.phase/tau,
+            time,shutterSeconds,_data.duration,_data.loop));
     }
     return true;
 }

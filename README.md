@@ -415,3 +415,16 @@ D3D11/D3D12各density atlas1/702、三种积分路径/双灯/resize/零场1/541�
 最后一次相同90样本64灯/1万点/1920x828默认无密度图配置：Presenter3.1807ms、点批次2.2276ms、
 整帧CPU15.8719/GPU9.1274ms、10000可见实例。是本机Debug样本，未据此承诺普遍帧率。
 资源格式登记与SDK写schema8、旧1..7空雾迁移同步；没有查看图片或连接演出硬件。
+
+### Strobe shutter
+
+`CompiledLightShow::evaluateShutter(time, seconds, frame)` analytically averages the
+procedural square-wave gate over a centered0..1s exposure. Zero keeps exact instant
+sampling. Authored intensity/color, pose, points and fog sample the center; this
+is not motion blur. Once clips/renormalizes the window; Loop restarts the gate
+clock at show boundaries, accounting for complete periods without iteration.
+Invalid inputs preserve the output. Studio `--shutter seconds` or Shutter button
+opts into exposure integration (instant/8.33ms/16.67ms); default instant, schema8 unchanged.
+The same fixture intensity feeds surface, volume and source aperture emission.
+
+Shutter validation:5 cases/122 assertions; full Sequence119/4141 and119-case inventory passed. D3D11/D3D12 hidden45-frame Studio passed; NaN shutter rejected with exit2.

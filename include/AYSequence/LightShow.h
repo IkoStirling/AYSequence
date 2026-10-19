@@ -127,6 +127,12 @@ public:
     /// Set procedural=false to sample authored keys for editing, excluding
     /// sweep and strobe modulation. Playback always includes procedural motion.
     bool evaluate(double time, LightShowFrame& output, bool procedural = true) const;
+    /// Average only the procedural strobe gate over a centered exposure in
+    /// [0,1] seconds. Zero preserves evaluate() exactly. Pose, color, authored
+    /// intensity, points and fog sample the center, without motion blur.
+    /// Once clips/renormalizes at show boundaries; Loop restarts the strobe
+    /// clock at each show boundary. Invalid input leaves output unchanged.
+    bool evaluateShutter(double time, double shutterSeconds, LightShowFrame& output) const;
     /// Check simultaneous drone separation over every authored formation interval.
     /// Linear and Smooth use the same geometric line and a shared monotone time
     /// parameter, so closest approach is solved continuously, not frame-sampled.

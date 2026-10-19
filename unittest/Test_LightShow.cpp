@@ -385,3 +385,66 @@ TEST_CASE(area_mode_steps_and_world_bias_interpolates_and_roundtrips) {
     data.fixtures[0].keys[0].value.areaShadowBias=-1;CHECK(!CompiledLightShow::compile(data));
 }
 TEST_SUITE_END
+
+TEST_SUITE(LightShowShutterTests)
+TEST_CASE(analytic_square_wave_handles_partial_cycles_and_true_off_windows) {
+    auto data=showFixture();auto& track=data.fixtures[0];track.keys.resize(1);
+    track.keys[0].value.intensity=100;track.strobeFrequency=10;track.strobeDuty=.25f;
+    auto show=CompiledLightShow::compile(data);LightShowFrame frame;
+    CHECK(show->evaluateShutter(.05,.1,frame));CHECK(std::abs(frame.fixtures[0].value.intensity-25)<1e-4);
+    CHECK(show->evaluateShutter(.02,.02,frame));CHECK(std::abs(frame.fixtures[0].value.intensity-75)<1e-3);
+    CHECK(show->evaluateShutter(.06,.01,frame));CHECK(frame.fixtures[0].value.intensity==0);
+    CHECK(show->evaluateShutter(0,.1,frame));CHECK(std::abs(frame.fixtures[0].value.intensity-50)<1e-4);
+    track.strobeDuty=0;show=CompiledLightShow::compile(data);CHECK(show->evaluateShutter(.4,1,frame));CHECK(frame.fixtures[0].value.intensity==0);
+    track.strobeDuty=1;show=CompiledLightShow::compile(data);CHECK(show->evaluateShutter(.4,1,frame));CHECK(frame.fixtures[0].value.intensity==100);
+    track.strobeFrequency=0;track.strobeDuty=0;show=CompiledLightShow::compile(data);CHECK(show->evaluateShutter(.4,1,frame));CHECK(frame.fixtures[0].value.intensity==100);
+}
+TEST_CASE(zero_shutter_preserves_instantaneous_evaluation_and_invalid_input_is_atomic) {
+    auto data=showFixture();data.fixtures[0].strobeFrequency=13;data.fixtures[0].sweepFrequency=2;data.fixtures[0].sweepPan=.4f;
+    auto show=CompiledLightShow::compile(data);LightShowFrame a,b;
+    for(double time:{0.,.012,.3,2.,4.}) {
+        CHECK(show->evaluate(time,a));CHECK(show->evaluateShutter(time,0,b));
+        CHECK(a.fixtures[0].value.intensity==b.fixtures[0].value.intensity);
+        CHECK(a.fixtures[0].value.pan==b.fixtures[0].value.pan);CHECK(a.points[0].position==b.points[0].position);
+    }
+    for(double shutter:{-1.,1.01,std::numeric_limits<double>::infinity(),std::numeric_limits<double>::quiet_NaN()}) {
+        CHECK(!show->evaluateShutter(1,shutter,b));CHECK(b.time==4);CHECK(b.fixtures[0].value.intensity==a.fixtures[0].value.intensity);
+    }
+    CHECK(!show->evaluateShutter(-.1,.01,b));CHECK(!show->evaluateShutter(4.1,.01,b));CHECK(b.time==4);
+}
+TEST_CASE(integration_samples_authored_values_and_pose_at_center_without_modulating_points_or_fog) {
+    auto data=showFixture();data.fixtures[0].strobeFrequency=100;data.fixtures[0].sweepFrequency=2;data.fixtures[0].sweepPan=.4f;
+    data.fog.keys={{0,{}},{4,{}}};data.fog.keys[1].value.density=.2f;
+    auto show=CompiledLightShow::compile(data);LightShowFrame base,instant,averaged;
+    CHECK(show->evaluate(2,base,false));CHECK(show->evaluate(2,instant));CHECK(show->evaluateShutter(2,.1,averaged));
+    CHECK(std::abs(averaged.fixtures[0].value.intensity-base.fixtures[0].value.intensity*.5f)<1e-5);
+    CHECK(averaged.fixtures[0].value.pan==instant.fixtures[0].value.pan);
+    CHECK(averaged.fixtures[0].value.color==base.fixtures[0].value.color);
+    CHECK(averaged.points[0].intensity==base.points[0].intensity);CHECK(averaged.points[0].position==base.points[0].position);
+    CHECK(averaged.fog.value.density==base.fog.value.density);
+}
+TEST_CASE(loop_boundaries_restart_authored_clock_and_tiny_show_periods_remain_bounded) {
+    auto data=showFixture();data.duration=.75;data.loop=true;data.formations.clear();auto& track=data.fixtures[0];track.keys.resize(1);
+    track.keys[0].value.intensity=1;track.strobeFrequency=1;track.strobeDuty=.5f;
+    auto show=CompiledLightShow::compile(data);LightShowFrame frame;
+    CHECK(show->evaluateShutter(0,1,frame));CHECK(std::abs(frame.fixtures[0].value.intensity-.75)<1e-6);
+    CHECK(show->evaluateShutter(.1,1,frame));CHECK(std::abs(frame.fixtures[0].value.intensity-.65)<1e-6);
+    CHECK(show->evaluateShutter(.5,.75,frame));CHECK(std::abs(frame.fixtures[0].value.intensity-2.f/3)<1e-6);
+    data.duration=1e-10;show=CompiledLightShow::compile(data);CHECK(show!=nullptr);
+    CHECK(show->evaluateShutter(0,1,frame));CHECK(std::abs(frame.fixtures[0].value.intensity-1)<1e-6);
+}
+TEST_CASE(late_clock_high_frequency_and_independent_numerical_loop_reference_agree) {
+    auto data=showFixture();data.duration=86400;data.formations.clear();auto& track=data.fixtures[0];track.keys.resize(1);
+    track.keys[0].value.intensity=1;track.strobeFrequency=1000;track.strobeDuty=.37f;
+    auto show=CompiledLightShow::compile(data);LightShowFrame frame;
+    CHECK(show->evaluateShutter(86399.5,.02,frame));CHECK(std::abs(frame.fixtures[0].value.intensity-.37)<1e-6);
+    data.duration=.73;data.loop=true;track.strobeFrequency=13;track.strobeDuty=.37f;track.phase=.7f;
+    show=CompiledLightShow::compile(data);
+    for(double time:{0.,.002,.1,.4,.72,.73})for(double shutter:{.001,.03,.3,1.}) {
+        double sum=0;constexpr int samples=20000;
+        for(int i=0;i<samples;++i){double t=std::fmod(time-shutter*.5+(i+.5)*shutter/samples,data.duration);if(t<0)t+=data.duration;
+            const double cycle=t*track.strobeFrequency+track.phase/(2*std::acos(-1.));sum+=(cycle-std::floor(cycle))<track.strobeDuty?1:0;}
+        CHECK(show->evaluateShutter(time,shutter,frame));CHECK(std::abs(frame.fixtures[0].value.intensity-sum/samples)<.0005);
+    }
+}
+TEST_SUITE_END

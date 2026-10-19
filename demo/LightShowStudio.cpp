@@ -33,7 +33,7 @@
 using namespace ayt;
 namespace {
 constexpr int toolbarHeight=288;
-enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle,ToggleFogMotion,KeyLane,KeyDestination,KeyInterpolation,MoveKey,CopyKey,RemoveKey,ApplyInterpolation,PreviousKey,NextKey,TogglePointLights,ToggleFlux,ToggleEmitters,SourceFront,SourceSide,SourceBack,LoadIes,ToggleLens,ToggleExposure,ApplyCamera,ToggleHousings,ToggleLeaves,ToggleAreaShadow,EditFog };
+enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle,ToggleFogMotion,KeyLane,KeyDestination,KeyInterpolation,MoveKey,CopyKey,RemoveKey,ApplyInterpolation,PreviousKey,NextKey,TogglePointLights,ToggleFlux,ToggleEmitters,SourceFront,SourceSide,SourceBack,LoadIes,ToggleLens,ToggleExposure,ApplyCamera,ToggleHousings,ToggleLeaves,ToggleAreaShadow,EditFog,ToggleShutter };
 struct Studio;
 void openFogPanel(Studio& studio);
 bool fogPanelSmoke(Studio& studio);
@@ -157,6 +157,7 @@ struct Studio {
     render::LensEffectsSettings lens;
     bool fixtureHousings=true;
     render::FixtureHousingSettings housingSettings;
+    double shutterSeconds=0;
     bool autoExposure=false;
     float exposureEV=0,adaptBright=2,adaptDark=1;
     HWND exposureEdit=nullptr,brightEdit=nullptr,darkEdit=nullptr;
@@ -479,7 +480,13 @@ struct Studio {
             MessageBoxA(window,error.c_str(),"Music",MB_OK|MB_ICONWARNING);
     }
 #endif
+    std::wstring shutterLabel() const {
+        if(shutterSeconds==0)return L"Shutter: instant";
+        wchar_t text[64]{};std::swprintf(text,64,L"Shutter: %.2f ms",shutterSeconds*1000);return text;
+    }
     void command(int id) {
+        if(id==ToggleShutter){shutterSeconds=shutterSeconds==0?1.0/120:shutterSeconds<=1.0/120?1.0/60:0;
+            renderer.resetVolumetricHistory();SetDlgItemTextW(window,ToggleShutter,shutterLabel().c_str());}
         if(id==EditFog){openFogPanel(*this);return;}
         if(id==Property)updateReadout();
         if(id==ToggleEmitters){fixtureEmitters=!fixtureEmitters;presenter.setFixtureEmitters(fixtureEmitters,emitterSettings);}
@@ -674,6 +681,7 @@ int main(int argc,char** argv) {
         if(arg=="--hidden")s.hidden=true;
         else if(arg=="--profile-gpu")profileGpu=true;
         else if(arg=="--profile-presenter")profilePresenter=true;
+        else if(arg=="--shutter"&&i+1<argc)s.shutterSeconds=std::stod(argv[++i]);
         else if(arg=="--fog-editor-smoke"){fogEditorSmoke=true;s.hidden=true;}
         else if(arg=="--frames"&&i+1<argc)frames=std::stoul(argv[++i]);
         else if(arg=="--points"&&i+1<argc)points=std::stoul(argv[++i]);
@@ -781,6 +789,7 @@ int main(int argc,char** argv) {
     if(steps<8||steps>64||windowWidth<1280||windowWidth>8192||windowHeight<480||windowHeight>8192
         ||surfaceBudget>256||volumeBudget>64||shadowBudget>8||pointBudget>65536||transparentDrawBudget>1024||transparentObjectBudget>32
         ||!std::isfinite(s.minimumSeparation)||s.minimumSeparation<=0
+        ||!std::isfinite(s.shutterSeconds)||s.shutterSeconds<0||s.shutterSeconds>1
         ||!smokeValid
         ||!std::isfinite(s.emitterSettings.radianceScale)||s.emitterSettings.radianceScale<0||s.emitterSettings.radianceScale>100
         ||!std::isfinite(s.emitterSettings.offAxisGlow)||s.emitterSettings.offAxisGlow<0||s.emitterSettings.offAxisGlow>1
@@ -868,6 +877,7 @@ int main(int argc,char** argv) {
     s.darkEdit=control(window,L"EDIT",std::to_wstring(s.adaptDark).c_str(),0,734,180,64,26,WS_BORDER|ES_AUTOHSCROLL);
     control(window,L"BUTTON",L"Apply camera",ApplyCamera,806,180,130,26);
     control(window,L"BUTTON",L"Fog authoring...",EditFog,944,180,160,26);
+    control(window,L"BUTTON",s.shutterLabel().c_str(),ToggleShutter,1112,180,160,26);
     if(!s.hidden)ShowWindow(window,SW_SHOW);
     render::InitDesc init;init.windowHandle=window;init.width=s.width;init.height=s.height;init.vsync=false;init.msaa=0;init.backend=backend;
     if(!s.renderer.initialize(init)){DestroyWindow(window);return 4;}s.initialized=true;
@@ -907,7 +917,7 @@ int main(int argc,char** argv) {
         else
 #endif
             s.player.advance(frames?1.0/60:std::min(dt,.25));
-        s.player.evaluate(s.frame);
+        s.show->evaluateShutter(s.player.time(),s.shutterSeconds,s.frame);
         s.fog.noiseTime=float(s.player.time());s.renderer.setVolumetricSettings(s.fog);
         const uint16_t viewHeight=s.height-toolbarHeight;
         s.renderer.setViewportRect(0,toolbarHeight,s.width,viewHeight);
@@ -976,13 +986,13 @@ int main(int argc,char** argv) {
         musicLoaded=s.music.loaded();
         if(musicLoaded)musicTime=double(s.music.engine.voicePositionFrames(s.music.voice))/s.music.engine.outputSampleRate();
 #endif
-        std::printf("{\"samples\":%zu,\"gpuSamples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"meanGpuMs\":%.4f,\"p95GpuMs\":%.4f,\"meanPresenterMs\":%.4f,\"meanRenderMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u,\"instancedPoints\":%s,\"showTimeSeconds\":%.4f,\"musicTimeSeconds\":%.4f,\"musicLoaded\":%s,\"pointLightCells\":%u,\"pointLights\":%u,\"pointLightBudgetSkipped\":%u,\"emitterPrepared\":%u,\"emitterBackFacing\":%u,\"emitterClamped\":%u,\"transparentLightDraws\":%u,\"transparentLightBudgetSkipped\":%u,\"transparentUnsupportedMaterials\":%u,\"fogResolution\":%u,\"gpuProfiling\":%s,\"meanVolumeGpuMs\":%.4f,\"meanLightingGpuMs\":%.4f,\"meanShadowGpuMs\":%.4f,\"rigidInstancedDraws\":%u,\"rigidInstancedObjects\":%u,\"froxel\":%s,\"froxelWidth\":%u,\"froxelHeight\":%u,\"froxelSlices\":%u,\"froxelCells\":%u,\"volumeHistoryUsed\":%s,\"presenterStageSamples\":%zu,\"meanPrepareLightsMs\":%.4f,\"meanPreparePointDataMs\":%.4f,\"meanPointAggregationMs\":%.4f,\"meanUploadLightPacketMs\":%.4f,\"meanPrepareHousingsMs\":%.4f,\"meanPreparePointDrawsMs\":%.4f,\"meanPrepareEmittersMs\":%.4f,\"meanPrepareFogMs\":%.4f,\"authoredFogKeys\":%zu,\"densityGridBound\":%s,\"densityGridCells\":%zu}\n",
+        std::printf("{\"samples\":%zu,\"gpuSamples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"meanGpuMs\":%.4f,\"p95GpuMs\":%.4f,\"meanPresenterMs\":%.4f,\"meanRenderMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u,\"instancedPoints\":%s,\"showTimeSeconds\":%.4f,\"musicTimeSeconds\":%.4f,\"musicLoaded\":%s,\"pointLightCells\":%u,\"pointLights\":%u,\"pointLightBudgetSkipped\":%u,\"emitterPrepared\":%u,\"emitterBackFacing\":%u,\"emitterClamped\":%u,\"transparentLightDraws\":%u,\"transparentLightBudgetSkipped\":%u,\"transparentUnsupportedMaterials\":%u,\"fogResolution\":%u,\"gpuProfiling\":%s,\"meanVolumeGpuMs\":%.4f,\"meanLightingGpuMs\":%.4f,\"meanShadowGpuMs\":%.4f,\"rigidInstancedDraws\":%u,\"rigidInstancedObjects\":%u,\"froxel\":%s,\"froxelWidth\":%u,\"froxelHeight\":%u,\"froxelSlices\":%u,\"froxelCells\":%u,\"volumeHistoryUsed\":%s,\"presenterStageSamples\":%zu,\"meanPrepareLightsMs\":%.4f,\"meanPreparePointDataMs\":%.4f,\"meanPointAggregationMs\":%.4f,\"meanUploadLightPacketMs\":%.4f,\"meanPrepareHousingsMs\":%.4f,\"meanPreparePointDrawsMs\":%.4f,\"meanPrepareEmittersMs\":%.4f,\"meanPrepareFogMs\":%.4f,\"authoredFogKeys\":%zu,\"densityGridBound\":%s,\"densityGridCells\":%zu,\"shutterSeconds\":%.6f}\n",
             timings.size(),gpuTimings.size(),s.width,s.height-toolbarHeight,
             sum/timings.size(),timings[size_t((timings.size()-1)*.95)],gpuMean,gpuP95,
             presenterSum/presenterTimings.size(),renderSum/renderTimings.size(),
             stats.surfaceDraws,stats.volumeDraws,stats.volumeBudgetSkipped,
             pointStats.source,pointStats.visible,pointStats.budgetSkipped,
-            pointStats.instanced?"true":"false",s.player.time(),musicTime,musicLoaded?"true":"false",aggregate.occupiedCells,aggregate.selectedLights,aggregate.budgetSkipped,emitters.prepared,emitters.backFacing,emitters.clamped,stats.transparentDraws,stats.transparentBudgetSkipped,stats.transparentUnsupportedMaterials,unsigned(s.fog.downsample),profileGpu?"true":"false",gpuPassTotals["Volumetric"]/std::max<size_t>(1,gpuTimings.size()),gpuPassTotals["Lighting"]/std::max<size_t>(1,gpuTimings.size()),gpuPassTotals["Shadow"]/std::max<size_t>(1,gpuTimings.size()),s.renderer.getFrameStats().instancedDrawCalls,s.renderer.getFrameStats().instancedObjects,s.renderer.getFrameStats().volumetric.froxel?"true":"false",unsigned(s.renderer.getFrameStats().volumetric.integrationWidth),unsigned(s.renderer.getFrameStats().volumetric.integrationHeight),unsigned(s.renderer.getFrameStats().volumetric.depthSlices),s.renderer.getFrameStats().volumetric.froxelCells,s.renderer.getFrameStats().volumetric.historyUsed?"true":"false",presenterStageSamples,presenterStageTotals[0]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[1]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[2]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[3]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[4]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[5]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[6]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[7]/std::max<size_t>(1,presenterStageSamples),s.show->data().fog.keys.size(),s.renderer.volumetricDensityField().profile?"true":"false",s.show->data().fog.grid.values.size());
+            pointStats.instanced?"true":"false",s.player.time(),musicTime,musicLoaded?"true":"false",aggregate.occupiedCells,aggregate.selectedLights,aggregate.budgetSkipped,emitters.prepared,emitters.backFacing,emitters.clamped,stats.transparentDraws,stats.transparentBudgetSkipped,stats.transparentUnsupportedMaterials,unsigned(s.fog.downsample),profileGpu?"true":"false",gpuPassTotals["Volumetric"]/std::max<size_t>(1,gpuTimings.size()),gpuPassTotals["Lighting"]/std::max<size_t>(1,gpuTimings.size()),gpuPassTotals["Shadow"]/std::max<size_t>(1,gpuTimings.size()),s.renderer.getFrameStats().instancedDrawCalls,s.renderer.getFrameStats().instancedObjects,s.renderer.getFrameStats().volumetric.froxel?"true":"false",unsigned(s.renderer.getFrameStats().volumetric.integrationWidth),unsigned(s.renderer.getFrameStats().volumetric.integrationHeight),unsigned(s.renderer.getFrameStats().volumetric.depthSlices),s.renderer.getFrameStats().volumetric.froxelCells,s.renderer.getFrameStats().volumetric.historyUsed?"true":"false",presenterStageSamples,presenterStageTotals[0]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[1]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[2]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[3]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[4]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[5]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[6]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[7]/std::max<size_t>(1,presenterStageSamples),s.show->data().fog.keys.size(),s.renderer.volumetricDensityField().profile?"true":"false",s.show->data().fog.grid.values.size(),s.shutterSeconds);
     }
     s.presenter.clearGoboTextures();
     for(auto& [name,asset]:s.iesAssets)s.renderer.destroyTexture(asset.texture);

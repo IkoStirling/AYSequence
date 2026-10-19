@@ -389,3 +389,14 @@ Studio Fog authoring面板提供物理key、16/32/64网格、Z层、值0..255、
 主时间轴多一条Fog标记，支持Previous/Next/Move/Copy/模式；最后一个雾key不可删除，可显式Clear track。
 原.lshow保存和bundle带入内嵌网格；无需额外外部密度格式。--fog-editor-smoke隐藏原生消息验证画板完整流程。
 Core/AssetIO无Renderer依赖；RendererIntegration测试仅在有渲染桥时启用。AYEditor嵌入三维/可视多轨仍在后续清单。
+
+### Strobe shutter
+
+`CompiledLightShow::evaluateShutter(time, seconds, frame)` analytically averages the
+procedural square-wave gate over a centered0..1s exposure. Zero keeps exact instant
+sampling. Authored intensity/color, pose, points and fog sample the center; this
+is not motion blur. Once clips/renormalizes the window; Loop restarts the gate
+clock at show boundaries, accounting for complete periods without iteration.
+Invalid inputs preserve the output. Studio `--shutter seconds` or Shutter button
+opts into exposure integration (instant/8.33ms/16.67ms); default instant, schema8 unchanged.
+The same fixture intensity feeds surface, volume and source aperture emission.
