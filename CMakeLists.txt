@@ -1,7 +1,7 @@
 cmake_minimum_required(VERSION 3.25)
 project(AYSequence VERSION 0.1.0 LANGUAGES CXX)
 
-add_library(AYSequence STATIC src/Sequence.cpp src/LightShow.cpp)
+add_library(AYSequence STATIC src/Sequence.cpp src/LightShow.cpp src/LightShowFog.cpp)
 add_library(AYSequence::Core ALIAS AYSequence)
 target_compile_features(AYSequence PUBLIC cxx_std_23)
 if(NOT TARGET AYAssetFormat)
@@ -12,7 +12,7 @@ target_link_libraries(AYSequence PRIVATE AYAssetFormat)
 target_include_directories(AYSequence PUBLIC
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
-add_library(AYSequenceEditorCore STATIC src/SequenceAuthoring.cpp src/LightShowAuthoring.cpp)
+add_library(AYSequenceEditorCore STATIC src/SequenceAuthoring.cpp src/LightShowAuthoring.cpp src/LightShowFogAuthoring.cpp)
 add_library(AYSequence::EditorCore ALIAS AYSequenceEditorCore)
 target_link_libraries(AYSequenceEditorCore PUBLIC AYSequence)
 
@@ -49,7 +49,7 @@ if(AY_SEQUENCE_BUILD_ANIMATION_INTEGRATION)
     target_link_libraries(AYSequenceAnimationIntegration PUBLIC AYSequenceEntityIntegration AYEntityAnimationIntegration)
 endif()
 if(TARGET AYRenderer)
-    add_library(AYSequenceRendererIntegration STATIC src/LightShowPresenter.cpp)
+    add_library(AYSequenceRendererIntegration STATIC src/LightShowPresenter.cpp src/LightShowFogPresenter.cpp)
     add_library(AYSequence::RendererIntegration ALIAS AYSequenceRendererIntegration)
     target_link_libraries(AYSequenceRendererIntegration PUBLIC AYSequence AYRenderer)
     if(WIN32 AND TARGET AYSequenceAssetIO)

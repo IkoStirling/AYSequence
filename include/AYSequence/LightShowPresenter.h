@@ -4,13 +4,14 @@
 #include <AYRenderer/PerformanceLighting.h>
 #include <AYRenderer/FixtureEmitters.h>
 #include <AYRenderer/FixtureHousings.h>
+#include <AYRenderer/VolumetricDensity.h>
 #include <unordered_map>
 namespace ayt::sequence {
 /// Optional owner-thread CPU preparation timings for one append, in milliseconds.
 /// Disabled values are zero; failed appends report completed=false and partial work.
 struct LightShowPresenterFrameStats {
     bool enabled=false,completed=false;
-    double lightsMs=0,pointDataMs=0,aggregationMs=0,packetMs=0,housingsMs=0,pointsMs=0,emittersMs=0,totalMs=0;
+    double lightsMs=0,pointDataMs=0,aggregationMs=0,packetMs=0,fogMs=0,housingsMs=0,pointsMs=0,emittersMs=0,totalMs=0;
 };
 /// Optional AYSequence::RendererIntegration. Feed one evaluated show frame on
 /// the Renderer owner thread. Main Deferred lights and CPU-owned point batches
@@ -56,6 +57,11 @@ public:
     render::FixtureHousingStats fixtureHousingStats() const noexcept {return _fixtureHousingsEnabled?_housings.stats():render::FixtureHousingStats{};}
     render::EmissivePointStats pointStats() const noexcept { return _points.stats(); }
 private:
+    bool applyFogFrame(render::Renderer& renderer,const LightShowFrame& frame,std::string* error);
+    render::Renderer* _fogRenderer=nullptr;
+    std::shared_ptr<const ShowFogGrid> _fogSource;
+    std::shared_ptr<const render::VolumetricDensityField> _fogProfile;
+    render::TextureHandle _fogTexture;
     bool _profiling=false;
     LightShowPresenterFrameStats _frameStats;
     std::unordered_map<std::uint32_t,render::TextureHandle> _goboTextures;

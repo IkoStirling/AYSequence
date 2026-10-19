@@ -387,3 +387,31 @@ LightShowPresenter::setProfilingEnabled默认关闭。frameStats()按值报告�
 相同90帧热身后样本，CPU Presenter7.6742→3.3616ms、点批次6.6615→2.3455ms，整帧CPU20.4229→16.5421ms。
 保持10000个可见实例；GPU均值10.0923/8.3168ms仅记录同机样本，不将其单独归因于CPU写入修改或承诺帧率。
 默认未开启计时时45帧预览分段样本0/各段0，退出0。schema7未变，无图片查看。
+
+
+## 2026-10-20 物理雾轨和密度画板（schema8）
+
+LightShow.fog为空时保留宿主数值控制，schema1..7升级为空轨；写schema8。最多4096物理雾key，
+可选局部uint8网格各轴1..64（最多262144cells），计入1M样本预算；compiled帧共享只读网格，不逐帧拷贝体素。
+Presenter保留宿主steps/downsample/froxel/history/debug选项，只应用编排物理量；按指针和完整内容比较缓存atlas，
+不使用hash代替数据相等。空轨不改宿主数值、释放Presenter自有场；宿主负责恢复自己的物理参数。
+新增fogMs/meanPrepareFogMs诊断，完整CPU准备现在包括雾阶段。
+
+Studio Fog authoring面板提供物理key、16/32/64网格、Z层、值0..255、半径1..16、强度0..1、2D/3D软刷及填充。
+拖动只复制有界网格预览，释放鼠标后编译一次并留一个undo快照；快照变化会取消旧笔画。
+主时间轴多一条Fog标记，支持Previous/Next/Move/Copy/模式；最后一个雾key不可删除，可显式Clear track。
+原.lshow保存和bundle带入内嵌网格；无需额外外部密度格式。--fog-editor-smoke隐藏原生消息验证画板完整流程。
+Core/AssetIO无Renderer依赖；RendererIntegration测试仅在有渲染桥时启用。AYEditor嵌入三维/可视多轨仍在后续清单。
+
+
+2026-10-20 schema8雾编排最终验收：Contracts171/2242、PostProcess252/1363、SceneMaterial79/10042、
+UI114/377、FrameGraph41/159、Sequence114/4019、Shader12/213（73生产变体/生成打包/无编译器加载）通过。
+整包循环重载测试补齐bgfx延迟释放帧边界，八轮重载/旧token失效仍验证；临时诊断快捷路径已移除。
+D3D11/D3D12各density atlas1/702、三种积分路径/双灯/resize/零场1/541通过；
+既有局部/全局×动态/静态×1/2/4重建1/1298、legacy散射/局部盒/阴影1/737、旧光学9/395在两后端均通过。
+隐藏原生Fog画板创建16³、拖动/一次Undo/Redo、物理key与编解码两后端通过；D3D12同时froxel/history=true。
+独立Core/EditorCore构建与fog/key/brush合约通过，无Renderer/音频/AssetIO。
+清单Renderer1038/10分区、Sequence114/3分区无遗漏重复；SDK129能力/53模块/95检索/561符号，0错误0警告。
+最后一次相同90样本64灯/1万点/1920x828默认无密度图配置：Presenter3.1807ms、点批次2.2276ms、
+整帧CPU15.8719/GPU9.1274ms、10000可见实例。是本机Debug样本，未据此承诺普遍帧率。
+资源格式登记与SDK写schema8、旧1..7空雾迁移同步；没有查看图片或连接演出硬件。

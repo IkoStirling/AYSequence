@@ -1,6 +1,7 @@
 #pragma once
 
 #include <array>
+#include <AYSequence/LightShowFog.h>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -10,8 +11,6 @@
 
 namespace ayt::sequence {
 
-using ShowVec3 = std::array<float, 3>;
-enum class ShowInterpolation : std::uint8_t { Step, Linear, Smooth };
 enum class ShowIntensityUnit : std::uint8_t { Legacy, Candela, Lumen };
 enum class ShowGobo : std::uint8_t { Open, Stripes, Grid, Ring, Star, Texture };
 
@@ -80,12 +79,14 @@ struct LightShow {
     bool loop = true;
     std::vector<FixtureTrack> fixtures;
     std::vector<FormationKey> formations;
+    ShowFogTrack fog;
 };
 struct EvaluatedFixture { std::uint32_t id = 0; FixtureState value; bool requiresIes = false; };
 struct LightShowFrame {
     double time = 0;
     std::vector<EvaluatedFixture> fixtures;
     std::vector<ShowPoint> points;
+    EvaluatedShowFog fog;
 };
 
 struct FormationClearanceConflict {
@@ -120,7 +121,9 @@ public:
     static std::shared_ptr<const CompiledLightShow> compile(
         LightShow data, std::string* error = nullptr);
     /// Absolute-time evaluation, independent of frame cadence. Caller-owned
-    /// output reuses vector capacity. Seek emits no events and performs no I/O.
+    /// output reuses vector capacity. Fog keys share a compiled immutable grid,
+    /// without per-frame voxel copies; quality settings belong to the render host.
+    /// Seek emits no events and performs no I/O.
     /// Set procedural=false to sample authored keys for editing, excluding
     /// sweep and strobe modulation. Playback always includes procedural motion.
     bool evaluate(double time, LightShowFrame& output, bool procedural = true) const;
@@ -135,8 +138,11 @@ public:
                                    FormationClearanceReport& output) const;
     const LightShow& data() const noexcept { return _data; }
 private:
-    explicit CompiledLightShow(LightShow data) : _data(std::move(data)) {}
+    explicit CompiledLightShow(LightShow data) : _data(std::move(data)) {
+        if(!_data.fog.grid.values.empty())_fogGrid=std::make_shared<const ShowFogGrid>(_data.fog.grid);
+    }
     LightShow _data;
+    std::shared_ptr<const ShowFogGrid> _fogGrid;
 };
 
 /// Insert one middle formation key for a conflicting transition, assigning

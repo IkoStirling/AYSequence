@@ -1,3 +1,4 @@
+#include "LightShowFogInternal.h"
 #include <AYSequence/LightShowPresenter.h>
 #include <AYRenderer.h>
 #include <cmath>
@@ -19,6 +20,7 @@ bool LightShowPresenter::append(render::Renderer& renderer,render::RenderScene& 
     const auto start=_profiling?Clock::now():Clock::time_point{};auto mark=start;
     struct Finish {LightShowPresenterFrameStats& stats;Clock::time_point start;~Finish(){if(stats.enabled)stats.totalMs=std::chrono::duration<double,std::milli>(Clock::now()-start).count();}} finish{_frameStats,start};
     const auto lap=[&](double& target){if(_profiling){const auto now=Clock::now();target=std::chrono::duration<double,std::milli>(now-mark).count();mark=now;}};
+    if(frame.fog.authored&&!detail::validFogState(frame.fog.value)){if(error)*error="Invalid authored fog state";return false;}
     _lights.resize(frame.fixtures.size());
     for(size_t i=0;i<_lights.size();++i) {
         const auto& source=frame.fixtures[i];const auto& s=source.value;
@@ -68,6 +70,8 @@ bool LightShowPresenter::append(render::Renderer& renderer,render::RenderScene& 
     lap(_frameStats.aggregationMs);
     if(!renderer.setPerformanceLights(_lights,lightBudget,error))return false;
     lap(_frameStats.packetMs);
+    if(!applyFogFrame(renderer,frame,error))return false;
+    lap(_frameStats.fogMs);
     _pointLightingStats=aggregateStats;
     if(_fixtureHousingsEnabled&&!_housings.append(renderer,scene,std::span<const render::PerformanceLight>(_lights).first(frame.fixtures.size()),_fixtureHousingSettings,error))return false;
     lap(_frameStats.housingsMs);

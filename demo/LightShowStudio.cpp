@@ -26,13 +26,17 @@
 #include <filesystem>
 #include <fstream>
 #include <numbers>
+#include <optional>
 #include <set>
 #include <unordered_map>
 
 using namespace ayt;
 namespace {
 constexpr int toolbarHeight=288;
-enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle,ToggleFogMotion,KeyLane,KeyDestination,KeyInterpolation,MoveKey,CopyKey,RemoveKey,ApplyInterpolation,PreviousKey,NextKey,TogglePointLights,ToggleFlux,ToggleEmitters,SourceFront,SourceSide,SourceBack,LoadIes,ToggleLens,ToggleExposure,ApplyCamera,ToggleHousings,ToggleLeaves,ToggleAreaShadow };
+enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle,ToggleFogMotion,KeyLane,KeyDestination,KeyInterpolation,MoveKey,CopyKey,RemoveKey,ApplyInterpolation,PreviousKey,NextKey,TogglePointLights,ToggleFlux,ToggleEmitters,SourceFront,SourceSide,SourceBack,LoadIes,ToggleLens,ToggleExposure,ApplyCamera,ToggleHousings,ToggleLeaves,ToggleAreaShadow,EditFog };
+struct Studio;
+void openFogPanel(Studio& studio);
+bool fogPanelSmoke(Studio& studio);
 struct ShowRevision { std::shared_ptr<const sequence::CompiledLightShow> show; std::string path; };
 #if defined(AY_LIGHTSHOW_AUDIO)
 // Studio-only bridge: the decoded clip's playback head is the show clock.
@@ -134,6 +138,7 @@ struct Studio {
     std::deque<ShowRevision> undo,redo;
     std::vector<std::vector<size_t>> targetMembers;
     int cameraMode=0;
+    HWND fogEditor=nullptr;
     HWND window=nullptr,target=nullptr,property=nullptr,value=nullptr,time=nullptr,valueReadout=nullptr,timeline=nullptr;
     std::array<uint8_t,1024> timelineBins{};
     bool running=true,initialized=false,hidden=false;
@@ -164,13 +169,14 @@ struct Studio {
         return result;
     }
     void adjacentKey(bool next){
-        const bool formations=SendMessageW(keyLane,CB_GETCURSEL,0,0)==1;
+        const auto lane=SendMessageW(keyLane,CB_GETCURSEL,0,0);const bool formations=lane==1,fogKeys=lane==2;
         const auto ids=selectedFixtureIds();double best=next?show->data().duration:0;bool found=false;
         const auto scan=[&](const auto& keys){for(const auto& key:keys){
             if((next&&key.time>player.time()+1e-6&&(!found||key.time<best))
                 ||(!next&&key.time<player.time()-1e-6&&(!found||key.time>best))){best=key.time;found=true;}
         }};
-        if(formations)scan(show->data().formations);
+        if(fogKeys)scan(show->data().fog.keys);
+        else if(formations)scan(show->data().formations);
         else for(const auto& track:show->data().fixtures)if(std::find(ids.begin(),ids.end(),track.id)!=ids.end())scan(track.keys);
         if(found)seekPreview(best);
     }
@@ -182,10 +188,10 @@ struct Studio {
         if(timed&&(end==text||*end!=0||!std::isfinite(destination))){
             MessageBoxW(window,L"Enter a destination time in seconds.",L"Key edit",MB_OK|MB_ICONWARNING);return;
         }
-        const bool formations=SendMessageW(keyLane,CB_GETCURSEL,0,0)==1;
-        const auto ids=formations?std::vector<uint32_t>{}:selectedFixtureIds();sequence::LightShow edited;
+        const auto lane=SendMessageW(keyLane,CB_GETCURSEL,0,0);const bool formations=lane==1,fogKeys=lane==2;
+        const auto ids=(formations||fogKeys)?std::vector<uint32_t>{}:selectedFixtureIds();sequence::LightShow edited;
         const auto mode=static_cast<sequence::ShowInterpolation>(SendMessageW(keyInterpolation,CB_GETCURSEL,0,0));
-        if(sequence::editLightShowKeys(show->data(),ids,formations,player.time(),timed?destination:player.time(),operation,mode,edited,&error)){
+        if(sequence::editLightShowKeys(show->data(),ids,formations,player.time(),timed?destination:player.time(),operation,mode,edited,&error,fogKeys)){
             const auto time=timed?destination:player.time();edit(std::move(edited));seekPreview(time);
         }else MessageBoxA(window,error.c_str(),"Key edit",MB_OK|MB_ICONWARNING);
     }
@@ -199,6 +205,7 @@ struct Studio {
         };
         for(const auto& fixture:show->data().fixtures)for(const auto& key:fixture.keys)mark(key.time,1);
         for(const auto& key:show->data().formations)mark(key.time,2);
+        for(const auto& key:show->data().fog.keys)mark(key.time,4);
         if(timeline)InvalidateRect(timeline,nullptr,FALSE);
     }
     void seekPreview(double seconds){
@@ -473,6 +480,7 @@ struct Studio {
     }
 #endif
     void command(int id) {
+        if(id==EditFog){openFogPanel(*this);return;}
         if(id==Property)updateReadout();
         if(id==ToggleEmitters){fixtureEmitters=!fixtureEmitters;presenter.setFixtureEmitters(fixtureEmitters,emitterSettings);}
         if(id==SourceFront)cameraMode=4;if(id==SourceSide)cameraMode=5;if(id==SourceBack)cameraMode=6;
@@ -593,6 +601,8 @@ struct Studio {
 HWND control(HWND parent,const wchar_t* type,const wchar_t* title,int id,int x,int y,int w,int h,DWORD style=0) {
     return CreateWindowExW(0,type,title,WS_CHILD|WS_VISIBLE|style,x,y,w,h,parent,reinterpret_cast<HMENU>(INT_PTR(id)),GetModuleHandleW(nullptr),nullptr);
 }
+#include "LightShowFogPanel.inl"
+
 LRESULT CALLBACK timelineProcedure(HWND window,UINT message,WPARAM w,LPARAM l){
     auto* s=reinterpret_cast<Studio*>(GetWindowLongPtrW(window,GWLP_USERDATA));
     if(message==WM_NCCREATE){
@@ -605,7 +615,7 @@ LRESULT CALLBACK timelineProcedure(HWND window,UINT message,WPARAM w,LPARAM l){
         SetDCBrushColor(dc,RGB(19,24,34));FillRect(dc,&rect,HBRUSH(GetStockObject(DC_BRUSH)));
         SelectObject(dc,GetStockObject(DC_PEN));SetBkMode(dc,TRANSPARENT);
         SetTextColor(dc,RGB(180,190,210));
-        TextOutW(dc,8,8,L"Music",5);TextOutW(dc,8,37,L"Lights",6);TextOutW(dc,8,50,L"Formation",9);
+        TextOutW(dc,8,2,L"Music",5);TextOutW(dc,8,25,L"Lights",6);TextOutW(dc,8,38,L"Formation",9);TextOutW(dc,8,51,L"Fog",3);
         const int left=100,right=std::max(left+1,int(rect.right)-8),span=right-left;
         SetDCPenColor(dc,RGB(54,63,80));
         for(int i=0;i<=10;++i){const int x=left+span*i/10;MoveToEx(dc,x,2,nullptr);LineTo(dc,x,rect.bottom-2);}
@@ -613,14 +623,15 @@ LRESULT CALLBACK timelineProcedure(HWND window,UINT message,WPARAM w,LPARAM l){
         SetDCPenColor(dc,RGB(65,165,190));
         for(size_t i=0;i<s->music.waveform.size();++i){
             const int x=left+int(i*span/(s->music.waveform.size()-1));
-            const int half=int(s->music.waveform[i]*12);
-            MoveToEx(dc,x,19-half,nullptr);LineTo(dc,x,20+half);
+            const int half=int(s->music.waveform[i]*8);
+            MoveToEx(dc,x,12-half,nullptr);LineTo(dc,x,13+half);
         }
 #endif
         for(size_t i=0;i<s->timelineBins.size();++i){
             const int x=left+int(i*span/(s->timelineBins.size()-1));
-            if(s->timelineBins[i]&1){SetDCPenColor(dc,RGB(245,153,67));MoveToEx(dc,x,36,nullptr);LineTo(dc,x,46);}
-            if(s->timelineBins[i]&2){SetDCPenColor(dc,RGB(127,216,152));MoveToEx(dc,x,49,nullptr);LineTo(dc,x,59);}
+            if(s->timelineBins[i]&1){SetDCPenColor(dc,RGB(245,153,67));MoveToEx(dc,x,25,nullptr);LineTo(dc,x,35);}
+            if(s->timelineBins[i]&2){SetDCPenColor(dc,RGB(127,216,152));MoveToEx(dc,x,38,nullptr);LineTo(dc,x,48);}
+            if(s->timelineBins[i]&4){SetDCPenColor(dc,RGB(140,165,255));MoveToEx(dc,x,51,nullptr);LineTo(dc,x,61);}
         }
         if(s->show){
             const int x=left+int(std::clamp(s->player.time()/s->show->data().duration,0.0,1.0)*span);
@@ -653,7 +664,7 @@ int main(int argc,char** argv) {
     uint32_t windowWidth=1280,windowHeight=800;
     uint32_t surfaceBudget=64,volumeBudget=32,shadowBudget=4,transparentDrawBudget=128,transparentObjectBudget=8;
     uint32_t pointBudget=65536;
-    bool stepsExplicit=false,volumeExplicit=false,pointExplicit=false,pointCpu=false,staticFog=false,profileGpu=false,profilePresenter=false;
+    bool stepsExplicit=false,volumeExplicit=false,pointExplicit=false,pointCpu=false,staticFog=false,profileGpu=false,profilePresenter=false,fogEditorSmoke=false;
     render::PerformanceLightBudget lightBudget{64,32,4};
     render::ScreenSpaceIndirectSettings indirect;
     bool patterns=false,areaShadows=false,reflections=false;std::string capture,preset,sceneMode="occluders",musicPath;
@@ -663,6 +674,7 @@ int main(int argc,char** argv) {
         if(arg=="--hidden")s.hidden=true;
         else if(arg=="--profile-gpu")profileGpu=true;
         else if(arg=="--profile-presenter")profilePresenter=true;
+        else if(arg=="--fog-editor-smoke"){fogEditorSmoke=true;s.hidden=true;}
         else if(arg=="--frames"&&i+1<argc)frames=std::stoul(argv[++i]);
         else if(arg=="--points"&&i+1<argc)points=std::stoul(argv[++i]);
         else if(arg=="--fixtures"&&i+1<argc)fixtures=std::stoul(argv[++i]);
@@ -819,7 +831,7 @@ int main(int argc,char** argv) {
     control(window,L"BUTTON",L"Export show folder...",ExportBundle,856,77,180,26);
     control(window,L"BUTTON",L"Animated fog on/off",ToggleFogMotion,1044,77,188,26);
     s.keyLane=control(window,L"COMBOBOX",L"",KeyLane,8,112,150,150,CBS_DROPDOWNLIST);
-    for(const auto* label:{L"Fixture keys",L"Formation keys"})SendMessageW(s.keyLane,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label));
+    for(const auto* label:{L"Fixture keys",L"Formation keys",L"Fog keys"})SendMessageW(s.keyLane,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label));
     SendMessageW(s.keyLane,CB_SETCURSEL,0,0);
     control(window,L"BUTTON",L"Previous",PreviousKey,166,112,80,26);control(window,L"BUTTON",L"Next",NextKey,250,112,65,26);
     control(window,L"STATIC",L"To (s)",0,323,117,48,22);
@@ -855,6 +867,7 @@ int main(int argc,char** argv) {
     control(window,L"STATIC",L"Darken",0,666,185,64,22);
     s.darkEdit=control(window,L"EDIT",std::to_wstring(s.adaptDark).c_str(),0,734,180,64,26,WS_BORDER|ES_AUTOHSCROLL);
     control(window,L"BUTTON",L"Apply camera",ApplyCamera,806,180,130,26);
+    control(window,L"BUTTON",L"Fog authoring...",EditFog,944,180,160,26);
     if(!s.hidden)ShowWindow(window,SW_SHOW);
     render::InitDesc init;init.windowHandle=window;init.width=s.width;init.height=s.height;init.vsync=false;init.msaa=0;init.backend=backend;
     if(!s.renderer.initialize(init)){DestroyWindow(window);return 4;}s.initialized=true;
@@ -882,7 +895,8 @@ int main(int argc,char** argv) {
     const auto sourceOccluder=s.renderer.createMaterialFromPhoskia(render::kPbrPhoskiaSource,"source_occlusion_unlit");
     s.renderer.setMaterialColor(sourceOccluder,"baseColor",.005f,.006f,.008f,1);s.renderer.setMaterialModel(sourceOccluder,render::MaterialModel::Unlit);
     auto previous=std::chrono::steady_clock::now();
-    std::array<double,7> presenterStageTotals{};size_t presenterStageSamples=0;
+    if(fogEditorSmoke&&!fogPanelSmoke(s)){std::fprintf(stderr,"Fog editor smoke failed: %s\n",s.error.c_str());s.renderer.shutdown();DestroyWindow(window);return 4;}
+    std::array<double,8> presenterStageTotals{};size_t presenterStageSamples=0;
     std::vector<double> timings,gpuTimings,presenterTimings,renderTimings;std::unordered_map<std::string,double> gpuPassTotals;uint32_t rendered=0;
     while(s.running&&(!frames||rendered<frames+8)) {
         MSG message;while(PeekMessageW(&message,nullptr,0,0,PM_REMOVE)){TranslateMessage(&message);DispatchMessageW(&message);}
@@ -928,7 +942,7 @@ int main(int argc,char** argv) {
         if(rendered>=30&&(!frames||rendered<frames)){
             timings.push_back(elapsed);
             presenterTimings.push_back(std::chrono::duration<double,std::milli>(presenterEnd-presenterBegin).count());
-            const auto cpu=s.presenter.frameStats();if(cpu.enabled&&cpu.completed){++presenterStageSamples;const std::array<double,7> stages{cpu.lightsMs,cpu.pointDataMs,cpu.aggregationMs,cpu.packetMs,cpu.housingsMs,cpu.pointsMs,cpu.emittersMs};for(size_t i=0;i<stages.size();++i)presenterStageTotals[i]+=stages[i];}
+            const auto cpu=s.presenter.frameStats();if(cpu.enabled&&cpu.completed){++presenterStageSamples;const std::array<double,8> stages{cpu.lightsMs,cpu.pointDataMs,cpu.aggregationMs,cpu.packetMs,cpu.housingsMs,cpu.pointsMs,cpu.emittersMs,cpu.fogMs};for(size_t i=0;i<stages.size();++i)presenterStageTotals[i]+=stages[i];}
             renderTimings.push_back(std::chrono::duration<double,std::milli>(std::chrono::steady_clock::now()-presenterEnd).count());
             const float gpuMs=s.renderer.getFrameStats().gpuFrameTimeMs;
             if(std::isfinite(gpuMs)&&gpuMs>0){gpuTimings.push_back(gpuMs);for(const auto& pass:s.renderer.getFrameStats().passes)if(std::isfinite(pass.gpuTimeMs)&&pass.gpuTimeMs>0)gpuPassTotals[pass.name]+=pass.gpuTimeMs;}
@@ -962,13 +976,13 @@ int main(int argc,char** argv) {
         musicLoaded=s.music.loaded();
         if(musicLoaded)musicTime=double(s.music.engine.voicePositionFrames(s.music.voice))/s.music.engine.outputSampleRate();
 #endif
-        std::printf("{\"samples\":%zu,\"gpuSamples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"meanGpuMs\":%.4f,\"p95GpuMs\":%.4f,\"meanPresenterMs\":%.4f,\"meanRenderMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u,\"instancedPoints\":%s,\"showTimeSeconds\":%.4f,\"musicTimeSeconds\":%.4f,\"musicLoaded\":%s,\"pointLightCells\":%u,\"pointLights\":%u,\"pointLightBudgetSkipped\":%u,\"emitterPrepared\":%u,\"emitterBackFacing\":%u,\"emitterClamped\":%u,\"transparentLightDraws\":%u,\"transparentLightBudgetSkipped\":%u,\"transparentUnsupportedMaterials\":%u,\"fogResolution\":%u,\"gpuProfiling\":%s,\"meanVolumeGpuMs\":%.4f,\"meanLightingGpuMs\":%.4f,\"meanShadowGpuMs\":%.4f,\"rigidInstancedDraws\":%u,\"rigidInstancedObjects\":%u,\"froxel\":%s,\"froxelWidth\":%u,\"froxelHeight\":%u,\"froxelSlices\":%u,\"froxelCells\":%u,\"volumeHistoryUsed\":%s,\"presenterStageSamples\":%zu,\"meanPrepareLightsMs\":%.4f,\"meanPreparePointDataMs\":%.4f,\"meanPointAggregationMs\":%.4f,\"meanUploadLightPacketMs\":%.4f,\"meanPrepareHousingsMs\":%.4f,\"meanPreparePointDrawsMs\":%.4f,\"meanPrepareEmittersMs\":%.4f}\n",
+        std::printf("{\"samples\":%zu,\"gpuSamples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"meanGpuMs\":%.4f,\"p95GpuMs\":%.4f,\"meanPresenterMs\":%.4f,\"meanRenderMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u,\"instancedPoints\":%s,\"showTimeSeconds\":%.4f,\"musicTimeSeconds\":%.4f,\"musicLoaded\":%s,\"pointLightCells\":%u,\"pointLights\":%u,\"pointLightBudgetSkipped\":%u,\"emitterPrepared\":%u,\"emitterBackFacing\":%u,\"emitterClamped\":%u,\"transparentLightDraws\":%u,\"transparentLightBudgetSkipped\":%u,\"transparentUnsupportedMaterials\":%u,\"fogResolution\":%u,\"gpuProfiling\":%s,\"meanVolumeGpuMs\":%.4f,\"meanLightingGpuMs\":%.4f,\"meanShadowGpuMs\":%.4f,\"rigidInstancedDraws\":%u,\"rigidInstancedObjects\":%u,\"froxel\":%s,\"froxelWidth\":%u,\"froxelHeight\":%u,\"froxelSlices\":%u,\"froxelCells\":%u,\"volumeHistoryUsed\":%s,\"presenterStageSamples\":%zu,\"meanPrepareLightsMs\":%.4f,\"meanPreparePointDataMs\":%.4f,\"meanPointAggregationMs\":%.4f,\"meanUploadLightPacketMs\":%.4f,\"meanPrepareHousingsMs\":%.4f,\"meanPreparePointDrawsMs\":%.4f,\"meanPrepareEmittersMs\":%.4f,\"meanPrepareFogMs\":%.4f,\"authoredFogKeys\":%zu,\"densityGridBound\":%s,\"densityGridCells\":%zu}\n",
             timings.size(),gpuTimings.size(),s.width,s.height-toolbarHeight,
             sum/timings.size(),timings[size_t((timings.size()-1)*.95)],gpuMean,gpuP95,
             presenterSum/presenterTimings.size(),renderSum/renderTimings.size(),
             stats.surfaceDraws,stats.volumeDraws,stats.volumeBudgetSkipped,
             pointStats.source,pointStats.visible,pointStats.budgetSkipped,
-            pointStats.instanced?"true":"false",s.player.time(),musicTime,musicLoaded?"true":"false",aggregate.occupiedCells,aggregate.selectedLights,aggregate.budgetSkipped,emitters.prepared,emitters.backFacing,emitters.clamped,stats.transparentDraws,stats.transparentBudgetSkipped,stats.transparentUnsupportedMaterials,unsigned(s.fog.downsample),profileGpu?"true":"false",gpuPassTotals["Volumetric"]/std::max<size_t>(1,gpuTimings.size()),gpuPassTotals["Lighting"]/std::max<size_t>(1,gpuTimings.size()),gpuPassTotals["Shadow"]/std::max<size_t>(1,gpuTimings.size()),s.renderer.getFrameStats().instancedDrawCalls,s.renderer.getFrameStats().instancedObjects,s.renderer.getFrameStats().volumetric.froxel?"true":"false",unsigned(s.renderer.getFrameStats().volumetric.integrationWidth),unsigned(s.renderer.getFrameStats().volumetric.integrationHeight),unsigned(s.renderer.getFrameStats().volumetric.depthSlices),s.renderer.getFrameStats().volumetric.froxelCells,s.renderer.getFrameStats().volumetric.historyUsed?"true":"false",presenterStageSamples,presenterStageTotals[0]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[1]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[2]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[3]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[4]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[5]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[6]/std::max<size_t>(1,presenterStageSamples));
+            pointStats.instanced?"true":"false",s.player.time(),musicTime,musicLoaded?"true":"false",aggregate.occupiedCells,aggregate.selectedLights,aggregate.budgetSkipped,emitters.prepared,emitters.backFacing,emitters.clamped,stats.transparentDraws,stats.transparentBudgetSkipped,stats.transparentUnsupportedMaterials,unsigned(s.fog.downsample),profileGpu?"true":"false",gpuPassTotals["Volumetric"]/std::max<size_t>(1,gpuTimings.size()),gpuPassTotals["Lighting"]/std::max<size_t>(1,gpuTimings.size()),gpuPassTotals["Shadow"]/std::max<size_t>(1,gpuTimings.size()),s.renderer.getFrameStats().instancedDrawCalls,s.renderer.getFrameStats().instancedObjects,s.renderer.getFrameStats().volumetric.froxel?"true":"false",unsigned(s.renderer.getFrameStats().volumetric.integrationWidth),unsigned(s.renderer.getFrameStats().volumetric.integrationHeight),unsigned(s.renderer.getFrameStats().volumetric.depthSlices),s.renderer.getFrameStats().volumetric.froxelCells,s.renderer.getFrameStats().volumetric.historyUsed?"true":"false",presenterStageSamples,presenterStageTotals[0]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[1]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[2]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[3]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[4]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[5]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[6]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[7]/std::max<size_t>(1,presenterStageSamples),s.show->data().fog.keys.size(),s.renderer.volumetricDensityField().profile?"true":"false",s.show->data().fog.grid.values.size());
     }
     s.presenter.clearGoboTextures();
     for(auto& [name,asset]:s.iesAssets)s.renderer.destroyTexture(asset.texture);

@@ -5,7 +5,7 @@
 namespace ayt::sequence {
 bool editLightShowKeys(const LightShow& source,std::span<const uint32_t> fixtureIds,
     bool formations,double sourceTime,double destinationTime,LightShowKeyEdit operation,
-    ShowInterpolation interpolation,LightShow& output,std::string* error) {
+    ShowInterpolation interpolation,LightShow& output,std::string* error,bool fog) {
     const auto fail=[&](const char* message){if(error)*error=message;return false;};
     if(operation>LightShowKeyEdit::Interpolation||interpolation>ShowInterpolation::Smooth
         ||!std::isfinite(sourceTime)||sourceTime<0||sourceTime>source.duration
@@ -34,6 +34,10 @@ bool editLightShowKeys(const LightShow& source,std::span<const uint32_t> fixture
     };
     for(auto& track:data.fixtures)if(selected.contains(track.id)&&!apply(track.keys))return fail("Destination already has a fixture key");
     if(formations&&!apply(data.formations))return fail("Destination already has a formation key");
+    if(fog){
+        if(operation==LightShowKeyEdit::Remove&&data.fog.keys.size()==1&&std::abs(data.fog.keys.front().time-sourceTime)<=1e-6)return fail("Cannot remove the last fog key; clear the track explicitly");
+        if(!apply(data.fog.keys))return fail("Destination already has a fog key");
+    }
     if(!changed)return fail("No selected key at the current time");
     auto result=CompiledLightShow::compile(std::move(data),error);if(!result)return false;
     output=result->data();if(error)error->clear();return true;

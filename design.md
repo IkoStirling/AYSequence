@@ -374,3 +374,18 @@ LightShowPresenter::setProfilingEnabled默认关闭。frameStats()按值报告�
 灯准备、点转换、聚合、灯包上传、灯壳、点批次、灯口和总CPU毫秒。失败为部分结果，关闭即清空；
 不包含Core求值/Renderer绘制或GPU，不改变提交内容。Studio --profile-presenter（或--profile-gpu）开启，
 使用既有30帧热身窗口平均，presenterStageSamples区分未采样与零耗时。
+
+
+## 2026-10-20 物理雾轨和密度画板（schema8）
+
+LightShow.fog为空时保留宿主数值控制，schema1..7升级为空轨；写schema8。最多4096物理雾key，
+可选局部uint8网格各轴1..64（最多262144cells），计入1M样本预算；compiled帧共享只读网格，不逐帧拷贝体素。
+Presenter保留宿主steps/downsample/froxel/history/debug选项，只应用编排物理量；按指针和完整内容比较缓存atlas，
+不使用hash代替数据相等。空轨不改宿主数值、释放Presenter自有场；宿主负责恢复自己的物理参数。
+新增fogMs/meanPrepareFogMs诊断，完整CPU准备现在包括雾阶段。
+
+Studio Fog authoring面板提供物理key、16/32/64网格、Z层、值0..255、半径1..16、强度0..1、2D/3D软刷及填充。
+拖动只复制有界网格预览，释放鼠标后编译一次并留一个undo快照；快照变化会取消旧笔画。
+主时间轴多一条Fog标记，支持Previous/Next/Move/Copy/模式；最后一个雾key不可删除，可显式Clear track。
+原.lshow保存和bundle带入内嵌网格；无需额外外部密度格式。--fog-editor-smoke隐藏原生消息验证画板完整流程。
+Core/AssetIO无Renderer依赖；RendererIntegration测试仅在有渲染桥时启用。AYEditor嵌入三维/可视多轨仍在后续清单。

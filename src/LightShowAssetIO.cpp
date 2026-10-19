@@ -12,12 +12,16 @@ NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FixtureKey,time,value,interpolation)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FixtureTrack,id,group,goboTexturePath,iesProfilePath,keys,sweepPan,sweepTilt,sweepFrequency,phase,strobeFrequency,strobeDuty)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ShowPoint,id,position,color,intensity,radius)
 NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(FormationKey,time,points,interpolation)
-NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LightShow,name,duration,loop,fixtures,formations)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ShowFogState,enabled,local,density,scattering,anisotropy,maxDistance,center,halfExtent,tint,noiseStrength,noiseScale)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ShowFogKey,time,value,interpolation)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ShowFogGrid,width,height,depth,values)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(ShowFogTrack,keys,grid)
+NLOHMANN_DEFINE_TYPE_NON_INTRUSIVE(LightShow,name,duration,loop,fixtures,formations,fog)
 namespace {
 constexpr std::size_t maxBytes=128*1024*1024;
 bool fail(std::string* error,const std::string& text){if(error)*error=text;return false;}
 bool pathValid(const std::string& path){return !path.empty()&&path.find('\0')==std::string::npos&&asset_format::isCanonicalPath(path,asset_format::Id::LightShow);}
-Json document(const LightShow& show){return Json{{"type","authoring.light-show"},{"version",7},{"show",show}};}
+Json document(const LightShow& show){return Json{{"type","authoring.light-show"},{"version",8},{"show",show}};}
 bool sameSchema(const Json& input,const Json& canonical) {
     if(canonical.is_number_float())return input.is_number()&&std::isfinite(input.get<double>());
     if(canonical.is_number_integer())return input.is_number_integer()&&input==canonical;
@@ -46,12 +50,13 @@ bool decodeLightShow(std::string_view bytes,LightShow& output,std::string* error
             if(event==Json::parse_event_t::object_end)keys.pop_back();return true;
         });
         if(!json.is_object()||json.size()!=3||json.at("type")!="authoring.light-show"
-            || !json.at("version").is_number_integer() || (json.at("version")!=1&&json.at("version")!=2&&json.at("version")!=3&&json.at("version")!=4&&json.at("version")!=5&&json.at("version")!=6&&json.at("version")!=7))
+            || !json.at("version").is_number_integer() || (json.at("version")!=1&&json.at("version")!=2&&json.at("version")!=3&&json.at("version")!=4&&json.at("version")!=5&&json.at("version")!=6&&json.at("version")!=7&&json.at("version")!=8))
             return fail(error,"Unsupported light show schema");
         // Check outer budgets before copying JSON arrays into runtime structures.
         const auto& data=json.at("show");
         if(data.at("fixtures").size()>256||data.at("formations").size()>4096)return fail(error,"Light show collection budget exceeded");
         std::size_t samples=0;
+        if(json.at("version")==8){const auto& fog=data.at("fog");const auto keyCount=fog.at("keys").size(),cells=fog.at("grid").at("values").size();if(keyCount>4096||cells>262144)return fail(error,"Fog collection budget exceeded");samples=keyCount+cells;}
         for(const auto& f:data.at("fixtures")){samples+=f.at("keys").size();if(samples>1000000)return fail(error,"Light show sample budget exceeded");}
         for(const auto& f:data.at("formations")){samples+=f.at("points").size();if(samples>1000000)return fail(error,"Light show sample budget exceeded");}
         // Bound collections before upgrading. Schema1 has no aperture field;
@@ -108,6 +113,11 @@ bool decodeLightShow(std::string_view bytes,LightShow& output,std::string* error
                 value["areaShadow"]=false;value["areaShadowBias"]=.003f;
             }
             json["version"]=7;
+        }
+        if(json.at("version")==7){
+            if(data.contains("fog"))return fail(error,"Schema7 cannot contain fog track");
+            json["show"]["fog"]={{"keys",Json::array()},{"grid",{{"width",0},{"height",0},{"depth",0},{"values",Json::array()}}}};
+            json["version"]=8;
         }
         auto show=data.get<LightShow>();
         // Shape/value checks reject unknown fields and lossy enum/int/vector

@@ -1,3 +1,4 @@
+#include "LightShowFogInternal.h"
 #include <AYSequence/LightShow.h>
 #include <algorithm>
 #include <cmath>
@@ -69,8 +70,9 @@ std::shared_ptr<const CompiledLightShow> CompiledLightShow::compile(LightShow da
     if (!std::isfinite(data.duration) || data.duration <= 0 || data.duration > 86400
         || data.name.size() > 256 || data.fixtures.size() > 256 || data.formations.size() > 4096)
         return fail("Invalid show duration/name or collection limit");
-    if (data.fixtures.empty() && data.formations.empty()) return fail("Show has no fixtures or formations");
-    std::size_t samples = 0;
+    if (data.fixtures.empty() && data.formations.empty() && data.fog.keys.empty()) return fail("Show has no authored tracks");
+    if(!detail::validateFogTrack(data.fog,data.duration,error))return {};
+    std::size_t samples=data.fog.keys.size()+data.fog.grid.values.size();
     std::unordered_set<std::uint32_t> fixtureIds;
     for (const auto& track : data.fixtures) {
         if (!fixtureIds.insert(track.id).second || track.group.size() > 128
@@ -128,6 +130,7 @@ std::shared_ptr<const CompiledLightShow> CompiledLightShow::compile(LightShow da
 bool CompiledLightShow::evaluate(double time, LightShowFrame& out, bool procedural) const {
     if (!std::isfinite(time) || time < 0 || time > _data.duration) return false;
     out.time = time; out.fixtures.resize(_data.fixtures.size());
+    out.fog.authored=!_data.fog.keys.empty();out.fog.value=out.fog.authored?detail::evaluateFogTrack(_data.fog,time):ShowFogState{};out.fog.grid=out.fog.authored?_fogGrid:nullptr;
     for (std::size_t i = 0; i < _data.fixtures.size(); ++i) {
         const auto& track = _data.fixtures[i];
         const auto a = lowerKey(track.keys,time), b = std::min(a+1,track.keys.size()-1);

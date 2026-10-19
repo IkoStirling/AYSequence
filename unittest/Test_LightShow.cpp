@@ -7,6 +7,7 @@
 #include <cmath>
 #include <fstream>
 #include <limits>
+#include <nlohmann/json.hpp>
 
 using namespace ayt::sequence;
 namespace {
@@ -232,16 +233,20 @@ TEST_CASE(roundtrip_preserves_lights_formations_patterns_and_absolute_time) {
     bytes.replace(angle,end-angle,"\"innerAngle\": 0.01");CHECK(decodeLightShow(bytes,copy,&error));
     CHECK(std::abs(copy.fixtures[0].keys[0].value.apertureRadius-.035f)<1e-6f);
 }
-TEST_CASE(schema1_through_6_migrate_optics_photometry_and_shadow_modes) {
+TEST_CASE(schema1_through_7_migrate_optics_photometry_shadows_and_absent_fog) {
     std::string bytes,error;CHECK(encodeLightShow(showFixture(),bytes));LightShow output;
-    CHECK(bytes.find("\"version\": 7")!=std::string::npos);
+    CHECK(bytes.find("\"version\": 8")!=std::string::npos);
     const auto removeField=[](std::string& document,const char* field){
         size_t at=0;
         while((at=document.find(field,at))!=std::string::npos){
             const auto end=document.find(',',at);document.erase(at,end+1-at);
         }
     };
-    auto legacy=bytes;legacy.replace(legacy.find("\"version\": 7"),12,"\"version\": 6");
+    auto document=nlohmann::json::parse(bytes);document["version"]=7;
+    CHECK(!decodeLightShow(document.dump(2),output,&error)); // no new fields in old schemas.
+    document["show"].erase("fog");auto legacy=document.dump(2);
+    CHECK(decodeLightShow(legacy,output,&error));CHECK(output.fog.keys.empty());CHECK(output.fog.grid.values.empty());
+    legacy.replace(legacy.find("\"version\": 7"),12,"\"version\": 6");
     CHECK(!decodeLightShow(legacy,output,&error));removeField(legacy,"\"areaShadow\"");removeField(legacy,"\"areaShadowBias\"");
     CHECK(decodeLightShow(legacy,output,&error));CHECK(!output.fixtures[0].keys[0].value.areaShadow);CHECK(output.fixtures[0].keys[0].value.areaShadowBias==.003f);
     legacy.replace(legacy.find("\"version\": 6"),12,"\"version\": 5");
@@ -270,7 +275,7 @@ TEST_CASE(schema1_through_6_migrate_optics_photometry_and_shadow_modes) {
     CHECK(!decodeLightShow(legacy,output,&error)); // v2 aperture is not legal in v1.
     removeField(legacy,"\"apertureRadius\"");CHECK(decodeLightShow(legacy,output,&error));
     for(const auto& key:output.fixtures[0].keys)CHECK(key.value.apertureRadius==0);
-    CHECK(encodeLightShow(output,legacy));CHECK(legacy.find("\"version\": 7")!=std::string::npos);
+    CHECK(encodeLightShow(output,legacy));CHECK(legacy.find("\"version\": 8")!=std::string::npos);
     removeField(bytes,"\"apertureRadius\"");CHECK(!decodeLightShow(bytes,output,&error));
     CHECK(output.fixtures[0].keys[0].value.apertureRadius==0); // failed decode preserves output.
 }
