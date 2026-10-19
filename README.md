@@ -3,7 +3,7 @@
 ## 灯光与发光点演出（2026-10-16）
 
 LightShow.h提供独立的owned快照、灯具键/扫动/频闪、稳定ID点阵编队和绝对时间播放器。
-LightShowAssetIO.h写严格schema6的.lshow JSON，读取schema1时出光口半径置零，
+LightShowAssetIO.h写严格schema7的.lshow JSON，读取schema1时出光口半径置零，
 读取schema1/2时图案焦点清晰且光阑全开，读取schema1/2/3时Gobo贴图路径为空，AYIO原子保存。
 灯具支持有限出光口半径、聚光核心半角和外层发散半角；默认窄角、无图案。
 图案柔焦/光阑可关键帧插值。Texture Gobo使用灯具级相对贴图路径，
@@ -306,3 +306,22 @@ bodyLength[.5,10]、hoodLength[0,4]为出光口半径倍数，leafAngle[-.5,.5]r
 Presenter.setFixtureHousings默认关闭；Studio默认开启，可切换Housings/ Shade leaves。
 --no-housings、--shade-leaves、--body-length、--hood-length、--leaf-angle控制会话预览，
 非法维度退出2；不改.lshow schema6。动画/关键帧仍拥有灯具姿态与出光口尺寸。
+
+
+## 2026-10-19 有限出光口半影（PCSS）
+
+PerformanceLight.areaShadow为可选模式，仍需castShadow与atlas槽，默认关闭保留旧硬影/2x2 PCF。
+瞳孔半径=apertureRadius×iris；先搜索更近遮挡深度，线性化ShadowCaster存储的
+.5+.5*(clipZ/clipW)，再估算世界半影R×(zReceiver-zBlocker)/zBlocker并过滤可见性。
+SpotShadowProjection.h是阴影生产矩阵与采样侧near/far/FOV的一致入口；源投影按有限瞳孔/棱镜扩大，
+覆盖近处光束口径，最大仍遵循175°FOV。接触处几何半影为零，远处/大瞳孔更柔。
+areaShadowBias[0,.1]为独立世界单位偏移（默认.003），旧light.shadowBias仍只用于legacy NDC比较。
+表面16、体积8个确定性分层样本，额外中心遮挡采样；搜索和过滤半径最多32个atlas像素，
+夹回本灯子图，既有shadowSoftness作为过滤下限。0半径回退旧路径，采样不使用历史或随机帧噪声。
+该PCSS是平行平面/平均遮挡深度近似，稀疏采样、atlas分辨率、近裁剪及半径预算会限制质量，
+并非多光源面积蒙卡阴影。不会增添新的shadow atlas槽或改变旧八灯Shader ABI。
+算法参考：https://download.nvidia.com/developer/SDK/Individual_Samples/MEDIA/docPix/docs/PCSS.pdf
+
+.lshow写schema7，schema1..6默认areaShadow=false和areaShadowBias=.003，旧版夹带新字段拒绝。
+areaShadow按键切换，偏移可插值；Presenter同帧转发。Studio的Area shadows切换会在开启时
+同时请求普通阴影，关闭只退回旧硬影/PCF；--area-shadows预览时为所有灯请求该模式，仍受预算。

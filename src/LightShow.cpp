@@ -33,6 +33,7 @@ FixtureState mix(const FixtureState& a, const FixtureState& b, float t) {
     out.apertureRadius = mix(a.apertureRadius,b.apertureRadius,t);
     out.focusDistance=mix(a.focusDistance,b.focusDistance,t);
     out.prismAngle=mix(a.prismAngle,b.prismAngle,t);out.prismRotation=mix(a.prismRotation,b.prismRotation,t);
+    out.areaShadowBias=mix(a.areaShadowBias,b.areaShadowBias,t);
     out.shadowSoftness = mix(a.shadowSoftness,b.shadowSoftness,t);
     out.goboRotation = mix(a.goboRotation,b.goboRotation,t); out.goboScale = mix(a.goboScale,b.goboScale,t);
     out.goboFocus = mix(a.goboFocus,b.goboFocus,t); out.iris = mix(a.iris,b.iris,t);
@@ -51,7 +52,7 @@ bool fixtureValid(const FixtureState& s) {
         && s.innerAngle < s.outerAngle
         && std::cos(s.innerAngle) >= std::cos(s.outerAngle) + .000001f
         && finite(s.volumetric,0,100) && finite(s.apertureRadius,0,1)
-        && finite(s.shadowSoftness,0,4)
+        && finite(s.shadowSoftness,0,4) && finite(s.areaShadowBias,0,.1f)
         && finite(s.goboRotation,-100000,100000) && finite(s.goboScale,.01f,100)
         && finite(s.goboFocus,0,1) && finite(s.iris,.01f,1)
         && finite(s.focusDistance,0,10000)&&s.prismCount>=1&&s.prismCount<=8

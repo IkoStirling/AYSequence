@@ -34,6 +34,9 @@ struct FixtureState {
     float apertureRadius = 0.035f;
     /// Optional bounded 2x2 shadow filter radius in atlas texels, [0,4].
     float shadowSoftness = 0;
+    /// Schema7: optional finite-pupil PCSS; world-space contact comparison bias.
+    bool areaShadow=false;
+    float areaShadowBias=.003f;
     /// Schema5: physical units assume meters; Legacy preserves previous shows.
     ShowIntensityUnit intensityUnit = ShowIntensityUnit::Legacy;
     /// Schema6: geometric focus distance (0 disables), equal-energy prism

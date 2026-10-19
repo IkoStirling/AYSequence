@@ -232,16 +232,19 @@ TEST_CASE(roundtrip_preserves_lights_formations_patterns_and_absolute_time) {
     bytes.replace(angle,end-angle,"\"innerAngle\": 0.01");CHECK(decodeLightShow(bytes,copy,&error));
     CHECK(std::abs(copy.fixtures[0].keys[0].value.apertureRadius-.035f)<1e-6f);
 }
-TEST_CASE(schema1_through_3_migrate_optics_and_texture_path) {
+TEST_CASE(schema1_through_6_migrate_optics_photometry_and_shadow_modes) {
     std::string bytes,error;CHECK(encodeLightShow(showFixture(),bytes));LightShow output;
-    CHECK(bytes.find("\"version\": 6")!=std::string::npos);
+    CHECK(bytes.find("\"version\": 7")!=std::string::npos);
     const auto removeField=[](std::string& document,const char* field){
         size_t at=0;
         while((at=document.find(field,at))!=std::string::npos){
             const auto end=document.find(',',at);document.erase(at,end+1-at);
         }
     };
-    auto legacy=bytes;legacy.replace(legacy.find("\"version\": 6"),12,"\"version\": 5");
+    auto legacy=bytes;legacy.replace(legacy.find("\"version\": 7"),12,"\"version\": 6");
+    CHECK(!decodeLightShow(legacy,output,&error));removeField(legacy,"\"areaShadow\"");removeField(legacy,"\"areaShadowBias\"");
+    CHECK(decodeLightShow(legacy,output,&error));CHECK(!output.fixtures[0].keys[0].value.areaShadow);CHECK(output.fixtures[0].keys[0].value.areaShadowBias==.003f);
+    legacy.replace(legacy.find("\"version\": 6"),12,"\"version\": 5");
     CHECK(!decodeLightShow(legacy,output,&error));
     removeField(legacy,"\"focusDistance\"");removeField(legacy,"\"prismCount\"");removeField(legacy,"\"prismAngle\"");removeField(legacy,"\"prismRotation\"");
     CHECK(decodeLightShow(legacy,output,&error));CHECK(output.fixtures[0].keys[0].value.focusDistance==0);CHECK(output.fixtures[0].keys[0].value.prismCount==1);
@@ -267,7 +270,7 @@ TEST_CASE(schema1_through_3_migrate_optics_and_texture_path) {
     CHECK(!decodeLightShow(legacy,output,&error)); // v2 aperture is not legal in v1.
     removeField(legacy,"\"apertureRadius\"");CHECK(decodeLightShow(legacy,output,&error));
     for(const auto& key:output.fixtures[0].keys)CHECK(key.value.apertureRadius==0);
-    CHECK(encodeLightShow(output,legacy));CHECK(legacy.find("\"version\": 6")!=std::string::npos);
+    CHECK(encodeLightShow(output,legacy));CHECK(legacy.find("\"version\": 7")!=std::string::npos);
     removeField(bytes,"\"apertureRadius\"");CHECK(!decodeLightShow(bytes,output,&error));
     CHECK(output.fixtures[0].keys[0].value.apertureRadius==0); // failed decode preserves output.
 }
@@ -364,5 +367,16 @@ TEST_CASE(focus_and_prism_continuous_parameters_interpolate_topology_steps) {
     std::string bytes;CHECK(encodeLightShow(data,bytes));LightShow copy;CHECK(decodeLightShow(bytes,copy));CHECK(copy.fixtures[0].keys.back().value.prismCount==4);
     track.keys.front().value.prismCount=9;CHECK(!CompiledLightShow::compile(data));
     track.keys.front().value.prismCount=2;track.keys.front().value.focusDistance=-1;CHECK(!CompiledLightShow::compile(data));
+}
+TEST_SUITE_END
+
+TEST_SUITE(LightShowAreaShadowTests)
+TEST_CASE(area_mode_steps_and_world_bias_interpolates_and_roundtrips) {
+    auto data=showFixture();auto a=data.fixtures[0].keys[0].value,b=a;a.areaShadowBias=.001f;b.areaShadow=true;b.areaShadowBias=.009f;
+    data.fixtures[0].keys={{0,a},{4,b}};auto show=CompiledLightShow::compile(data);CHECK(show!=nullptr);if(!show)return;
+    LightShowFrame frame;CHECK(show->evaluate(2,frame));CHECK(!frame.fixtures[0].value.areaShadow);CHECK(std::abs(frame.fixtures[0].value.areaShadowBias-.005f)<1e-6);
+    CHECK(show->evaluate(4,frame));CHECK(frame.fixtures[0].value.areaShadow);
+    std::string bytes;CHECK(encodeLightShow(data,bytes));LightShow copy;CHECK(decodeLightShow(bytes,copy));CHECK(copy.fixtures[0].keys.back().value.areaShadow);
+    data.fixtures[0].keys[0].value.areaShadowBias=-1;CHECK(!CompiledLightShow::compile(data));
 }
 TEST_SUITE_END

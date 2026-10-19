@@ -32,7 +32,7 @@
 using namespace ayt;
 namespace {
 constexpr int toolbarHeight=288;
-enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle,ToggleFogMotion,KeyLane,KeyDestination,KeyInterpolation,MoveKey,CopyKey,RemoveKey,ApplyInterpolation,PreviousKey,NextKey,TogglePointLights,ToggleFlux,ToggleEmitters,SourceFront,SourceSide,SourceBack,LoadIes,ToggleLens,ToggleExposure,ApplyCamera,ToggleHousings,ToggleLeaves };
+enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle,ToggleFogMotion,KeyLane,KeyDestination,KeyInterpolation,MoveKey,CopyKey,RemoveKey,ApplyInterpolation,PreviousKey,NextKey,TogglePointLights,ToggleFlux,ToggleEmitters,SourceFront,SourceSide,SourceBack,LoadIes,ToggleLens,ToggleExposure,ApplyCamera,ToggleHousings,ToggleLeaves,ToggleAreaShadow };
 struct ShowRevision { std::shared_ptr<const sequence::CompiledLightShow> show; std::string path; };
 #if defined(AY_LIGHTSHOW_AUDIO)
 // Studio-only bridge: the decoded clip's playback head is the show clock.
@@ -224,7 +224,7 @@ struct Studio {
             case 16:number=4*v;suffix=L" px";break;
             case 17:number=std::min(2,int(v*3));break;
             case 18:number=100*v;suffix=L" units";break;case 19:number=1+std::min(7,int(v*8));break;
-            case 20:number=.35*v*180/std::numbers::pi;suffix=L" deg";break;case 21:number=360*v;suffix=L" deg";break;
+            case 20:number=.35*v*180/std::numbers::pi;suffix=L" deg";break;case 21:number=360*v;suffix=L" deg";break;case 22:number=.1*v;suffix=L" units";break;
         }
         wchar_t text[64];swprintf_s(text,L"%.3g%ls",number,suffix);SetWindowTextW(valueReadout,text);
     }
@@ -320,7 +320,7 @@ struct Studio {
                 case 16:state.shadowSoftness=4*v;break;
                 case 17:state.intensityUnit=static_cast<sequence::ShowIntensityUnit>(std::min(2,int(v*3)));break;
                 case 18:state.focusDistance=100*v;break;case 19:state.prismCount=uint8_t(1+std::min(7,int(v*8)));break;
-                case 20:state.prismAngle=.35f*v;break;case 21:state.prismRotation=float(2*std::numbers::pi)*v;break;
+                case 20:state.prismAngle=.35f*v;break;case 21:state.prismRotation=float(2*std::numbers::pi)*v;break;case 22:state.areaShadowBias=.1f*v;break;
             }
             const double time=player.time();
             auto found=std::lower_bound(track.keys.begin(),track.keys.end(),time,[](const auto& k,double t){return k.time<t;});
@@ -564,6 +564,15 @@ struct Studio {
         if(id==Palette){auto data=show->data();for(auto& key:data.formations)for(auto& p:key.points)std::rotate(p.color.begin(),p.color.begin()+1,p.color.end());edit(std::move(data));}
         if(id==SmokeBox){fog.local=!fog.local;if(initialized)renderer.setVolumetricSettings(fog);}
         if(id==ToggleFogMotion){fog.noiseStrength=fog.noiseStrength>0?0:.35f;if(initialized)renderer.setVolumetricSettings(fog);}
+        if(id==ToggleAreaShadow){
+            const auto selected=SendMessageW(target,CB_GETCURSEL,0,0);
+            if(selected>=0&&size_t(selected)<targetMembers.size()){
+                auto data=show->data();for(const auto index:targetMembers[size_t(selected)]){
+                    auto& keys=data.fixtures[index].keys;const bool enabled=!keys.front().value.areaShadow;
+                    for(auto& key:keys){key.value.areaShadow=enabled;if(enabled)key.value.shadow=true;}
+                }edit(std::move(data));
+            }
+        }
         if(id==ToggleShadow){
             const auto selected=SendMessageW(target,CB_GETCURSEL,0,0);
             if(selected>=0&&size_t(selected)<targetMembers.size()){
@@ -645,7 +654,7 @@ int main(int argc,char** argv) {
     uint32_t pointBudget=65536;
     bool stepsExplicit=false,volumeExplicit=false,pointExplicit=false,pointCpu=false,staticFog=false;
     render::PerformanceLightBudget lightBudget{64,32,4};
-    bool patterns=false;std::string capture,preset,sceneMode="occluders",musicPath;
+    bool patterns=false,areaShadows=false;std::string capture,preset,sceneMode="occluders",musicPath;
     render::Backend backend=render::Backend::Direct3D11;Studio s;
     for(int i=1;i<argc;++i) {
         const std::string arg=argv[i];
@@ -690,6 +699,7 @@ int main(int argc,char** argv) {
         else if(arg=="--smoke-box"&&i+6<argc){s.fog.local=true;s.fog.center={std::stof(argv[++i]),std::stof(argv[++i]),std::stof(argv[++i])};s.fog.halfExtent={std::stof(argv[++i]),std::stof(argv[++i]),std::stof(argv[++i])};}
         else if(arg=="--min-separation"&&i+1<argc)s.minimumSeparation=std::stof(argv[++i]);
         else if(arg=="--patterns")patterns=true;
+        else if(arg=="--area-shadows")areaShadows=true;
         else if(arg=="--preset"&&i+1<argc)preset=argv[++i];
         else if(arg=="--scene"&&i+1<argc)sceneMode=argv[++i];
         else if(arg=="--time"&&i+1<argc)startTime=std::stod(argv[++i]);
@@ -748,6 +758,7 @@ int main(int argc,char** argv) {
     s.width=static_cast<uint16_t>(windowWidth);s.height=static_cast<uint16_t>(windowHeight);
     lightBudget={static_cast<uint16_t>(surfaceBudget),static_cast<uint8_t>(volumeBudget),static_cast<uint8_t>(shadowBudget)};
     if(!s.path.empty()&&!sequence::loadLightShow(s.path,data,&s.error)){std::fprintf(stderr,"%s\n",s.error.c_str());return 1;}
+    if(areaShadows)for(auto& fixture:data.fixtures)for(auto& key:fixture.keys){key.value.shadow=true;key.value.areaShadow=true;}
     s.show=sequence::CompiledLightShow::compile(std::move(data),&s.error);if(!s.show)return 2;
     s.rebuildTimeline();
     s.player.bind(s.show);if(!s.player.seek(startTime)){std::fprintf(stderr,"Invalid --time\n");return 2;}s.player.play();
@@ -774,7 +785,7 @@ int main(int argc,char** argv) {
     s.time=control(window,TRACKBAR_CLASSW,L"",Time,950,4,280,28,TBS_NOTICKS);SendMessageW(s.time,TBM_SETRANGE,TRUE,MAKELPARAM(0,1000));
     s.target=control(window,L"COMBOBOX",L"",Target,8,42,170,350,CBS_DROPDOWNLIST|WS_VSCROLL);
     s.property=control(window,L"COMBOBOX",L"",Property,188,42,170,350,CBS_DROPDOWNLIST);
-    for(const auto* name:{L"Intensity",L"Pan",L"Tilt",L"Field half-angle (deg)",L"Pattern rotation",L"Red",L"Green",L"Blue",L"Pattern",L"Strobe Hz",L"Volume strength",L"Core half-angle (deg)",L"Aperture radius (units)",L"Pattern focus",L"Iris opening",L"Pattern scale",L"Shadow softness (px)",L"Units: 0 legacy / 1 cd / 2 lm",L"Focus distance (units)",L"Prism lobes (1=off)",L"Prism tilt (deg)",L"Prism rotation (deg)"})SendMessageW(s.property,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));
+    for(const auto* name:{L"Intensity",L"Pan",L"Tilt",L"Field half-angle (deg)",L"Pattern rotation",L"Red",L"Green",L"Blue",L"Pattern",L"Strobe Hz",L"Volume strength",L"Core half-angle (deg)",L"Aperture radius (units)",L"Pattern focus",L"Iris opening",L"Pattern scale",L"Shadow softness (px)",L"Units: 0 legacy / 1 cd / 2 lm",L"Focus distance (units)",L"Prism lobes (1=off)",L"Prism tilt (deg)",L"Prism rotation (deg)",L"Area contact bias (units)"})SendMessageW(s.property,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));
     SendMessageW(s.property,CB_SETCURSEL,0,0);s.targets();
     s.value=control(window,TRACKBAR_CLASSW,L"",Value,370,39,230,30,TBS_NOTICKS);SendMessageW(s.value,TBM_SETRANGE,TRUE,MAKELPARAM(0,1000));SendMessageW(s.value,TBM_SETPOS,TRUE,500);
     s.valueReadout=control(window,L"STATIC",L"",0,604,46,76,22);s.updateReadout();
@@ -814,6 +825,7 @@ int main(int argc,char** argv) {
     control(window,L"BUTTON",L"IES profile...",LoadIes,580,146,130,26);
     control(window,L"BUTTON",s.fixtureHousings?L"Housings on":L"Housings off",ToggleHousings,718,146,150,26);
     control(window,L"BUTTON",s.housingSettings.shadeLeaves?L"Shade leaves on":L"Shade leaves off",ToggleLeaves,876,146,150,26);
+    control(window,L"BUTTON",L"Area shadows on/off",ToggleAreaShadow,1034,146,170,26);
     control(window,L"BUTTON",s.lens.enabled?L"Lens effects on":L"Lens effects off",ToggleLens,8,180,160,26);
     control(window,L"BUTTON",s.autoExposure?L"Auto exposure":L"Exposure locked",ToggleExposure,176,180,160,26);
     control(window,L"STATIC",L"Exposure EV",0,344,185,90,22);

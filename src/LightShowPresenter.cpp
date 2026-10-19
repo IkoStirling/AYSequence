@@ -24,7 +24,7 @@ bool LightShowPresenter::append(render::Renderer& renderer,render::RenderScene& 
         target.apertureRadius=s.apertureRadius;target.constantFlux=_constantFlux;
         target.pattern=static_cast<render::LightPattern>(s.gobo);target.patternRotation=s.goboRotation;target.patternScale=s.goboScale;
         target.patternFocus=s.goboFocus;target.iris=s.iris;
-        target.shadowSoftness=s.shadowSoftness;target.intensityUnit=static_cast<render::LightIntensityUnit>(s.intensityUnit);
+        target.shadowSoftness=s.shadowSoftness;target.areaShadow=s.areaShadow;target.areaShadowBias=s.areaShadowBias;target.intensityUnit=static_cast<render::LightIntensityUnit>(s.intensityUnit);
         target.focusDistance=s.focusDistance;target.prismCount=s.prismCount;target.prismAngle=s.prismAngle;target.prismRotation=s.prismRotation;
         if(source.requiresIes&&!_iesProfiles.contains(source.id)){if(error)*error="IES profile is not bound for fixture "+std::to_string(source.id);return false;}
         target.iesProfile.reset();target.iesTexture={};
