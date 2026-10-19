@@ -366,3 +366,11 @@ Studio --froxel启用Renderer有界网格，--froxel-tile 4|8|16、--froxel-slic
 
 --froxel-history同时启用网格与独立系数历史；volumeHistoryUsed报告实际帧级资格。
 时间拖动调用resetVolumetricHistory，默认仍关闭，无.lshow格式变化。
+
+
+## 2026-10-20 Presenter CPU 分段计时
+
+LightShowPresenter::setProfilingEnabled默认关闭。frameStats()按值报告最近append的enabled/completed与
+灯准备、点转换、聚合、灯包上传、灯壳、点批次、灯口和总CPU毫秒。失败为部分结果，关闭即清空；
+不包含Core求值/Renderer绘制或GPU，不改变提交内容。Studio --profile-presenter（或--profile-gpu）开启，
+使用既有30帧热身窗口平均，presenterStageSamples区分未采样与零耗时。

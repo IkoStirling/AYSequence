@@ -6,11 +6,22 @@
 #include <AYRenderer/FixtureHousings.h>
 #include <unordered_map>
 namespace ayt::sequence {
+/// Optional owner-thread CPU preparation timings for one append, in milliseconds.
+/// Disabled values are zero; failed appends report completed=false and partial work.
+struct LightShowPresenterFrameStats {
+    bool enabled=false,completed=false;
+    double lightsMs=0,pointDataMs=0,aggregationMs=0,packetMs=0,housingsMs=0,pointsMs=0,emittersMs=0,totalMs=0;
+};
 /// Optional AYSequence::RendererIntegration. Feed one evaluated show frame on
 /// the Renderer owner thread. Main Deferred lights and CPU-owned point batches
 /// share the caller's camera/time. Does not advance the player or mutate World.
 class LightShowPresenter final {
 public:
+    /// Enable synchronous CPU stage measurements; default off, no GPU waits.
+    /// Disabling clears the last snapshot. Does not change rendering/budgets.
+    void setProfilingEnabled(bool enabled) noexcept {_profiling=enabled;if(!enabled)_frameStats={};}
+    /// Value snapshot of the most recent append. completed distinguishes failure.
+    LightShowPresenterFrameStats frameStats() const noexcept {return _frameStats;}
     /// Bind a live Renderer-owned texture to a fixture ID. A Texture key without
     /// a binding fails append before replacing the active light packet.
     void bindGoboTexture(std::uint32_t fixtureId,render::TextureHandle texture);
@@ -45,6 +56,8 @@ public:
     render::FixtureHousingStats fixtureHousingStats() const noexcept {return _fixtureHousingsEnabled?_housings.stats():render::FixtureHousingStats{};}
     render::EmissivePointStats pointStats() const noexcept { return _points.stats(); }
 private:
+    bool _profiling=false;
+    LightShowPresenterFrameStats _frameStats;
     std::unordered_map<std::uint32_t,render::TextureHandle> _goboTextures;
     struct IesBinding {std::shared_ptr<const render::IesProfile> profile;render::TextureHandle atlas;};
     std::unordered_map<std::uint32_t,IesBinding> _iesProfiles;
