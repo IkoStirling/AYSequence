@@ -220,3 +220,17 @@ Studio的Point light on/off切换0/16；--point-lights 0..64、--point-light-cel
 `setConstantFlux`/`--constant-flux`/Flux zoom on/off对所有灯具启用相同的远场角光通变焦
 归一化；参考核心/外场半角2°/3°，表面与体积共享比例，Gobo/光阑仍吸收能量。
 有限出光口近场、真实镜头焦面与棱镜尚未模拟。
+
+## 2026-10-19 正视灯具预览
+
+Presenter的`setFixtureEmitters(true, settings)`可启用Renderer可见发光口，默认关闭以保留宿主
+原行为。它使用同一求值帧的灯具位置、Pan/Tilt、RGB、强度/频闪、口径和iris；
+setConstantFlux会同时影响表面光、体积与灯口。读取Renderer当前烟雾设置做灯口中心视线透射。
+不写.lshow，不改变schema4，也不生成ECS组件或每灯材质；关闭不保留旧批次到新场景。
+
+Studio默认开启，Emitters on/off切换；Source front/side/back对准首灯，便于核对背面不发光。
+--preset source建立固定单灯发光口对照，--view source-front|source-side|source-back选择视角；
+--scene source-occluded|source-half提供完整/半遮挡。--no-emitters禁用，--emitter-scale和
+--emitter-glow分别设置HDR标定比例与微弱侧向辉光。隐藏JSON的emitterPrepared/emitterBackFacing/emitterClamped
+报告CPU准备、背向和HDR夹取数量，不代表深度遮挡后的实际可见灯口数。
+发光口是近似圆盘；不模拟灯体外壳、镜片Gobo像、星芒或镜头鬼影。

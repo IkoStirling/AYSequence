@@ -51,6 +51,8 @@ bool LightShowPresenter::append(render::Renderer& renderer,render::RenderScene& 
     }
     if(!renderer.setPerformanceLights(_lights,lightBudget,error))return false;
     _pointLightingStats=aggregateStats;
-    return _points.append(renderer,scene,_pointData,view,projection,width,height,pointSettings,error);
+    if(!_points.append(renderer,scene,_pointData,view,projection,width,height,pointSettings,error))return false;
+    return !_fixtureEmittersEnabled||_emitters.append(renderer,scene,
+        std::span<const render::PerformanceLight>(_lights).first(frame.fixtures.size()),view,projection,width,height,_fixtureEmitterSettings,error);
 }
 } // namespace ayt::sequence

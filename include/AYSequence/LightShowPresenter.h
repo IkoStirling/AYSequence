@@ -2,6 +2,7 @@
 #include <AYSequence/LightShow.h>
 #include <AYRenderer/EmissivePointCloud.h>
 #include <AYRenderer/PerformanceLighting.h>
+#include <AYRenderer/FixtureEmitters.h>
 #include <unordered_map>
 namespace ayt::sequence {
 /// Optional AYSequence::RendererIntegration. Feed one evaluated show frame on
@@ -24,10 +25,19 @@ public:
     /// and surfaceLights budget are shared. Does not depend on maxPoints.
     void setPointLighting(render::EmissivePointLightingSettings settings) noexcept { _pointLighting=settings; }
     render::EmissivePointLightingStats pointLightingStats() const noexcept { return _pointLightingStats; }
+    /// Optional visible, oriented HDR fixture exits. Default off preserves
+    /// existing hosts. Uses Renderer medium settings and scene depth; intensity,
+    /// iris, color, strobe and constantFlux follow the same evaluated frame.
+    void setFixtureEmitters(bool enabled,render::FixtureEmitterSettings settings={}) noexcept {
+        _fixtureEmittersEnabled=enabled;_fixtureEmitterSettings=settings;
+    }
+    render::FixtureEmitterStats fixtureEmitterStats() const noexcept { return _fixtureEmittersEnabled?_emitters.stats():render::FixtureEmitterStats{}; }
     render::EmissivePointStats pointStats() const noexcept { return _points.stats(); }
 private:
     std::unordered_map<std::uint32_t,render::TextureHandle> _goboTextures;
-    bool _constantFlux=false;
+    bool _constantFlux=false,_fixtureEmittersEnabled=false;
+    render::FixtureEmitterSettings _fixtureEmitterSettings;
+    render::FixtureEmitters _emitters;
     render::EmissivePointCloud _points;
     render::EmissivePointLightingSettings _pointLighting{0};
     render::EmissivePointLightingStats _pointLightingStats;

@@ -30,8 +30,8 @@
 
 using namespace ayt;
 namespace {
-constexpr int toolbarHeight=218;
-enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle,ToggleFogMotion,KeyLane,KeyDestination,KeyInterpolation,MoveKey,CopyKey,RemoveKey,ApplyInterpolation,PreviousKey,NextKey,TogglePointLights,ToggleFlux };
+constexpr int toolbarHeight=252;
+enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle,ToggleFogMotion,KeyLane,KeyDestination,KeyInterpolation,MoveKey,CopyKey,RemoveKey,ApplyInterpolation,PreviousKey,NextKey,TogglePointLights,ToggleFlux,ToggleEmitters,SourceFront,SourceSide,SourceBack };
 struct ShowRevision { std::shared_ptr<const sequence::CompiledLightShow> show; std::string path; };
 #if defined(AY_LIGHTSHOW_AUDIO)
 // Studio-only bridge: the decoded clip's playback head is the show clock.
@@ -144,7 +144,8 @@ struct Studio {
     std::unordered_map<std::string,render::TextureHandle> goboTextures;
     HWND keyLane=nullptr,keyDestination=nullptr,keyInterpolation=nullptr;
     render::EmissivePointLightingSettings pointLighting{0};
-    bool constantFlux=false;
+    bool constantFlux=false,fixtureEmitters=true;
+    render::FixtureEmitterSettings emitterSettings;
     float minimumSeparation=.5f;
     std::vector<uint32_t> selectedFixtureIds() const {
         std::vector<uint32_t> result;
@@ -409,6 +410,8 @@ struct Studio {
 #endif
     void command(int id) {
         if(id==Property)updateReadout();
+        if(id==ToggleEmitters){fixtureEmitters=!fixtureEmitters;presenter.setFixtureEmitters(fixtureEmitters,emitterSettings);}
+        if(id==SourceFront)cameraMode=4;if(id==SourceSide)cameraMode=5;if(id==SourceBack)cameraMode=6;
         if(id==PreviousKey)adjacentKey(false);if(id==NextKey)adjacentKey(true);
         if(id==MoveKey)editKeys(sequence::LightShowKeyEdit::Move);
         if(id==CopyKey)editKeys(sequence::LightShowKeyEdit::Copy);
@@ -560,7 +563,7 @@ LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM w,LPARAM l) {
     if(!s)return DefWindowProcW(window,message,w,l);
     if(message==WM_CLOSE){s->running=false;return 0;}
     if(message==WM_COMMAND){s->command(LOWORD(w));return 0;}
-    if(message==WM_SIZE){s->width=static_cast<uint16_t>(std::max(1,int(LOWORD(l))));s->height=static_cast<uint16_t>(std::max(toolbarHeight+1,int(HIWORD(l))));if(s->timeline)MoveWindow(s->timeline,8,146,std::max(1,int(s->width)-16),64,TRUE);if(s->initialized)s->renderer.resize(s->width,s->height);return 0;}
+    if(message==WM_SIZE){s->width=static_cast<uint16_t>(std::max(1,int(LOWORD(l))));s->height=static_cast<uint16_t>(std::max(toolbarHeight+1,int(HIWORD(l))));if(s->timeline)MoveWindow(s->timeline,8,180,std::max(1,int(s->width)-16),64,TRUE);if(s->initialized)s->renderer.resize(s->width,s->height);return 0;}
     if(message==WM_HSCROLL&&reinterpret_cast<HWND>(l)==s->time){s->seekPreview(double(SendMessageW(s->time,TBM_GETPOS,0,0))/1000*s->show->data().duration);return 0;}
     if(message==WM_HSCROLL&&reinterpret_cast<HWND>(l)==s->value){s->updateReadout();return 0;}
     return DefWindowProcW(window,message,w,l);
@@ -592,6 +595,9 @@ int main(int argc,char** argv) {
         else if(arg=="--point-light-cell"&&i+1<argc)s.pointLighting.cellSize=std::stof(argv[++i]);
         else if(arg=="--point-light-range"&&i+1<argc)s.pointLighting.range=std::stof(argv[++i]);
         else if(arg=="--point-light-scale"&&i+1<argc)s.pointLighting.intensityScale=std::stof(argv[++i]);
+        else if(arg=="--no-emitters")s.fixtureEmitters=false;
+        else if(arg=="--emitter-scale"&&i+1<argc)s.emitterSettings.radianceScale=std::stof(argv[++i]);
+        else if(arg=="--emitter-glow"&&i+1<argc)s.emitterSettings.offAxisGlow=std::stof(argv[++i]);
         else if(arg=="--constant-flux")s.constantFlux=true;
         else if(arg=="--point-cpu")pointCpu=true;
         else if(arg=="--static-fog")staticFog=true;
@@ -601,19 +607,26 @@ int main(int argc,char** argv) {
         else if(arg=="--preset"&&i+1<argc)preset=argv[++i];
         else if(arg=="--scene"&&i+1<argc)sceneMode=argv[++i];
         else if(arg=="--time"&&i+1<argc)startTime=std::stod(argv[++i]);
-        else if(arg=="--view"&&i+1<argc){const std::string view=argv[++i];s.cameraMode=view=="stage"?1:view=="sky"?2:0;}
+        else if(arg=="--view"&&i+1<argc){const std::string view=argv[++i];s.cameraMode=view=="stage"?1:view=="sky"?2:view=="source-front"?4:view=="source-side"?5:view=="source-back"?6:0;}
         else if(arg=="--capture"&&i+1<argc)capture=argv[++i];
         else if(arg=="--music"&&i+1<argc)musicPath=argv[++i];
         else if(arg=="--backend"&&i+1<argc)backend=std::string(argv[++i])=="d3d12"?render::Backend::Direct3D12:render::Backend::Direct3D11;
         else s.path=arg;
     }
-    s.presenter.setPointLighting(s.pointLighting);s.presenter.setConstantFlux(s.constantFlux);
+    s.presenter.setPointLighting(s.pointLighting);s.presenter.setConstantFlux(s.constantFlux);s.presenter.setFixtureEmitters(s.fixtureEmitters,s.emitterSettings);
     sequence::LightShow data=sequence::makeLightShowExample(fixtures,points);
     if(preset=="single") {
         s.cameraMode=3;
         data=sequence::makeLightShowExample(1,0);auto& track=data.fixtures.front();
         track.sweepPan=track.sweepTilt=0;auto& value=track.keys.front().value;
         value.position={0,7,0};value.pan=0;value.tilt=.35f;value.color={.25f,.65f,1};
+    }
+    if(preset=="source"){
+        data=sequence::makeLightShowExample(1,0);auto& track=data.fixtures.front();
+        track.sweepPan=track.sweepTilt=track.strobeFrequency=0;auto& value=track.keys.front().value;
+        value.position={0,7,0};value.pan=float(std::numbers::pi);value.tilt=float(std::numbers::pi/2);
+        value.apertureRadius=.12f;value.color={1,.8f,.5f};
+        if(s.cameraMode==0)s.cameraMode=4;
     }
     if(patterns)for(size_t i=0;i<data.fixtures.size();++i)
         for(auto& key:data.fixtures[i].keys)key.value.gobo=static_cast<sequence::ShowGobo>(i%5);
@@ -629,8 +642,10 @@ int main(int argc,char** argv) {
         ||surfaceBudget>256||volumeBudget>64||shadowBudget>8||pointBudget>65536
         ||!std::isfinite(s.minimumSeparation)||s.minimumSeparation<=0
         ||!smokeValid
-        ||(sceneMode!="air"&&sceneMode!="floor"&&sceneMode!="occluders")){
-        std::fprintf(stderr,"Invalid viewport, light budget, --steps, --min-separation or --scene\n");return 2;
+        ||!std::isfinite(s.emitterSettings.radianceScale)||s.emitterSettings.radianceScale<0||s.emitterSettings.radianceScale>100
+        ||!std::isfinite(s.emitterSettings.offAxisGlow)||s.emitterSettings.offAxisGlow<0||s.emitterSettings.offAxisGlow>1
+        ||(sceneMode!="air"&&sceneMode!="floor"&&sceneMode!="occluders"&&sceneMode!="source-half"&&sceneMode!="source-occluded")){
+        std::fprintf(stderr,"Invalid viewport, light budget, --steps, --min-separation, --scene or --emitter settings\n");return 2;
     }
     s.width=static_cast<uint16_t>(windowWidth);s.height=static_cast<uint16_t>(windowHeight);
     lightBudget={static_cast<uint16_t>(surfaceBudget),static_cast<uint8_t>(volumeBudget),static_cast<uint8_t>(shadowBudget)};
@@ -688,7 +703,11 @@ int main(int argc,char** argv) {
     control(window,L"BUTTON",L"Set mode",ApplyInterpolation,777,112,90,26);
     control(window,L"BUTTON",L"Point light on/off",TogglePointLights,875,112,160,26);
     control(window,L"BUTTON",L"Flux zoom on/off",ToggleFlux,1043,112,160,26);
-    s.timeline=CreateWindowExW(0,timelineClass.lpszClassName,L"",WS_CHILD|WS_VISIBLE,8,146,
+    control(window,L"BUTTON",L"Emitters on/off",ToggleEmitters,8,146,150,26);
+    control(window,L"BUTTON",L"Source front",SourceFront,166,146,130,26);
+    control(window,L"BUTTON",L"Source side",SourceSide,304,146,130,26);
+    control(window,L"BUTTON",L"Source back",SourceBack,442,146,130,26);
+    s.timeline=CreateWindowExW(0,timelineClass.lpszClassName,L"",WS_CHILD|WS_VISIBLE,8,180,
         int(s.width)-16,64,window,nullptr,wc.hInstance,&s);
 #if defined(AY_LIGHTSHOW_AUDIO)
     control(window,L"BUTTON",L"Music...",LoadMusic,442,77,130,26);
@@ -704,6 +723,8 @@ int main(int argc,char** argv) {
     s.fog.noiseStrength=staticFog?0.f:.35f;s.fog.noiseScale=.2f;s.renderer.setVolumetricSettings(s.fog);
     const auto cube=s.renderer.createTexturedUnitCube();const auto material=s.renderer.createMaterialFromPhoskia(render::kPbrPhoskiaSource,"light_show_stage_pbr");
     s.renderer.setMaterialColor(material,"baseColor",.3f,.32f,.36f,1);s.renderer.setMaterialFloat(material,"roughness",.65f);
+    const auto sourceOccluder=s.renderer.createMaterialFromPhoskia(render::kPbrPhoskiaSource,"source_occlusion_unlit");
+    s.renderer.setMaterialColor(sourceOccluder,"baseColor",.005f,.006f,.008f,1);s.renderer.setMaterialModel(sourceOccluder,render::MaterialModel::Unlit);
     auto previous=std::chrono::steady_clock::now();
     std::vector<double> timings,gpuTimings,presenterTimings,renderTimings;uint32_t rendered=0;
     while(s.running&&(!frames||rendered<frames+8)) {
@@ -719,13 +740,23 @@ int main(int argc,char** argv) {
         s.fog.noiseTime=float(s.player.time());s.renderer.setVolumetricSettings(s.fog);
         const uint16_t viewHeight=s.height-toolbarHeight;
         s.renderer.setViewportRect(0,toolbarHeight,s.width,viewHeight);
-        const auto eye=s.cameraMode==3?math::FVector3(10,6,-13):s.cameraMode==1?math::FVector3(16,11,-23):math::FVector3(28,24,-38);
-        const auto aim=s.cameraMode==3?math::FVector3(0,3,1):s.cameraMode==1?math::FVector3(0,3,0):s.cameraMode==2?math::FVector3(0,18,0):math::FVector3(0,10,0);
-        s.renderer.setMainCameraLookAtPerspective(eye,aim,{0,1,0},55,float(s.width)/viewHeight,.1f,150);
+        auto eye=s.cameraMode==3?math::FVector3(10,6,-13):s.cameraMode==1?math::FVector3(16,11,-23):math::FVector3(28,24,-38);
+        auto aim=s.cameraMode==3?math::FVector3(0,3,1):s.cameraMode==1?math::FVector3(0,3,0):s.cameraMode==2?math::FVector3(0,18,0):math::FVector3(0,10,0);
+        math::FVector3 cameraUp{0,1,0};
+        if(s.cameraMode>=4&&!s.frame.fixtures.empty()){
+            const auto& fixture=s.frame.fixtures.front().value;aim={fixture.position[0],fixture.position[1],fixture.position[2]};
+            const math::FVector3 direction{std::sin(fixture.tilt)*std::sin(fixture.pan),-std::cos(fixture.tilt),std::sin(fixture.tilt)*std::cos(fixture.pan)};
+            const auto axis=std::abs(direction.y)>.99f?math::FVector3(0,0,1):math::FVector3(0,1,0);
+            const auto right=axis.cross(direction).normalize();cameraUp=direction.cross(right).normalize();
+            eye=aim+(s.cameraMode==4?direction:s.cameraMode==6?direction*-1:direction*.2f+right*.98f)*10;
+        }
+        s.renderer.setMainCameraLookAtPerspective(eye,aim,cameraUp,55,float(s.width)/viewHeight,.1f,150);
         math::Float4x4 view,projection;s.renderer.mainCameraMatrices(view,projection);
         render::RenderScene scene;
         if(sceneMode!="air")scene.add(cube,material,math::translate(0.f,-.2f,0.f)*math::scale(24.f,.4f,24.f));
         if(sceneMode=="occluders")for(int i=0;i<5;++i)scene.add(cube,material,math::translate(float(i*3-6),1.5f,0)*math::scale(1.f,3.f,1.f));
+        if(sceneMode=="source-occluded"||sceneMode=="source-half")
+            scene.add(cube,sourceOccluder,math::translate(sceneMode=="source-half"?-2.f:0.f,7.f,-3.f)*math::scale(2.f,3.f,.3f));
         const auto presenterBegin=std::chrono::steady_clock::now();
         if(!s.presenter.append(s.renderer,scene,s.frame,view,projection,s.width,viewHeight,
             lightBudget,{.75f,true,pointBudget,!pointCpu},&s.error)){
@@ -766,18 +797,19 @@ int main(int argc,char** argv) {
         const auto stats=s.renderer.performanceLightStats();
         const auto pointStats=s.presenter.pointStats();
         const auto aggregate=s.presenter.pointLightingStats();
+        const auto emitters=s.presenter.fixtureEmitterStats();
         double musicTime=0;bool musicLoaded=false;
 #if defined(AY_LIGHTSHOW_AUDIO)
         musicLoaded=s.music.loaded();
         if(musicLoaded)musicTime=double(s.music.engine.voicePositionFrames(s.music.voice))/s.music.engine.outputSampleRate();
 #endif
-        std::printf("{\"samples\":%zu,\"gpuSamples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"meanGpuMs\":%.4f,\"p95GpuMs\":%.4f,\"meanPresenterMs\":%.4f,\"meanRenderMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u,\"instancedPoints\":%s,\"showTimeSeconds\":%.4f,\"musicTimeSeconds\":%.4f,\"musicLoaded\":%s,\"pointLightCells\":%u,\"pointLights\":%u,\"pointLightBudgetSkipped\":%u}\n",
+        std::printf("{\"samples\":%zu,\"gpuSamples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"meanGpuMs\":%.4f,\"p95GpuMs\":%.4f,\"meanPresenterMs\":%.4f,\"meanRenderMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u,\"instancedPoints\":%s,\"showTimeSeconds\":%.4f,\"musicTimeSeconds\":%.4f,\"musicLoaded\":%s,\"pointLightCells\":%u,\"pointLights\":%u,\"pointLightBudgetSkipped\":%u,\"emitterPrepared\":%u,\"emitterBackFacing\":%u,\"emitterClamped\":%u}\n",
             timings.size(),gpuTimings.size(),s.width,s.height-toolbarHeight,
             sum/timings.size(),timings[size_t((timings.size()-1)*.95)],gpuMean,gpuP95,
             presenterSum/presenterTimings.size(),renderSum/renderTimings.size(),
             stats.surfaceDraws,stats.volumeDraws,stats.volumeBudgetSkipped,
             pointStats.source,pointStats.visible,pointStats.budgetSkipped,
-            pointStats.instanced?"true":"false",s.player.time(),musicTime,musicLoaded?"true":"false",aggregate.occupiedCells,aggregate.selectedLights,aggregate.budgetSkipped);
+            pointStats.instanced?"true":"false",s.player.time(),musicTime,musicLoaded?"true":"false",aggregate.occupiedCells,aggregate.selectedLights,aggregate.budgetSkipped,emitters.prepared,emitters.backFacing,emitters.clamped);
     }
     s.presenter.clearGoboTextures();
     for(auto& [name,texture]:s.goboTextures)s.renderer.destroyTexture(texture);
