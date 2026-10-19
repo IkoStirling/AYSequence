@@ -325,3 +325,12 @@ areaShadowBias[0,.1]为独立世界单位偏移（默认.003），旧light.shado
 .lshow写schema7，schema1..6默认areaShadow=false和areaShadowBias=.003，旧版夹带新字段拒绝。
 areaShadow按键切换，偏移可插值；Presenter同帧转发。Studio的Area shadows切换会在开启时
 同时请求普通阴影，关闭只退回旧硬影/PCF；--area-shadows预览时为所有灯请求该模式，仍受预算。
+
+
+## 2026-10-19 透明舞台与反射预览
+
+Studio --scene glass 加入两层标准透明PBR接收面；--reflections 启用既有Deferred SSR，
+并把舞台地面设为低粗糙度金属。SSR现在不要求外部IBL；只反射本帧可见不透明表面的已照明颜色。
+--transparent-draws [0,1024]、--transparent-lights [0,32] 控制透明直接光额度，默认128/8。
+性能JSON提供transparentLightDraws/transparentLightBudgetSkipped/transparentUnsupportedMaterials。
+这三个选项为预览会话设置，schema7未变；不宣称玻璃折射、透射阴影或完整间接照明。

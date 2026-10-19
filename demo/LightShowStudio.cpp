@@ -650,11 +650,11 @@ LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM w,LPARAM l) {
 int main(int argc,char** argv) {
     uint32_t fixtures=32,points=1000,frames=0,steps=48;double startTime=0;
     uint32_t windowWidth=1280,windowHeight=800;
-    uint32_t surfaceBudget=64,volumeBudget=32,shadowBudget=4;
+    uint32_t surfaceBudget=64,volumeBudget=32,shadowBudget=4,transparentDrawBudget=128,transparentObjectBudget=8;
     uint32_t pointBudget=65536;
     bool stepsExplicit=false,volumeExplicit=false,pointExplicit=false,pointCpu=false,staticFog=false;
     render::PerformanceLightBudget lightBudget{64,32,4};
-    bool patterns=false,areaShadows=false;std::string capture,preset,sceneMode="occluders",musicPath;
+    bool patterns=false,areaShadows=false,reflections=false;std::string capture,preset,sceneMode="occluders",musicPath;
     render::Backend backend=render::Backend::Direct3D11;Studio s;
     for(int i=1;i<argc;++i) {
         const std::string arg=argv[i];
@@ -665,6 +665,9 @@ int main(int argc,char** argv) {
         else if(arg=="--steps"&&i+1<argc){steps=std::stoul(argv[++i]);stepsExplicit=true;}
         else if(arg=="--width"&&i+1<argc)windowWidth=std::stoul(argv[++i]);
         else if(arg=="--height"&&i+1<argc)windowHeight=std::stoul(argv[++i]);
+        else if(arg=="--transparent-draws"&&i+1<argc)transparentDrawBudget=std::stoul(argv[++i]);
+        else if(arg=="--transparent-lights"&&i+1<argc)transparentObjectBudget=std::stoul(argv[++i]);
+        else if(arg=="--reflections")reflections=true;
         else if(arg=="--surface-lights"&&i+1<argc)surfaceBudget=std::stoul(argv[++i]);
         else if(arg=="--volume-lights"&&i+1<argc){volumeBudget=std::stoul(argv[++i]);volumeExplicit=true;}
         else if(arg=="--shadow-lights"&&i+1<argc)shadowBudget=std::stoul(argv[++i]);
@@ -747,16 +750,16 @@ int main(int argc,char** argv) {
     for(int axis=0;axis<3;++axis)smokeValid &= std::isfinite(s.fog.center[axis])&&std::abs(s.fog.center[axis])<=100000
         &&std::isfinite(s.fog.halfExtent[axis])&&s.fog.halfExtent[axis]>=.01f&&s.fog.halfExtent[axis]<=10000;
     if(steps<8||steps>64||windowWidth<1280||windowWidth>8192||windowHeight<480||windowHeight>8192
-        ||surfaceBudget>256||volumeBudget>64||shadowBudget>8||pointBudget>65536
+        ||surfaceBudget>256||volumeBudget>64||shadowBudget>8||pointBudget>65536||transparentDrawBudget>1024||transparentObjectBudget>32
         ||!std::isfinite(s.minimumSeparation)||s.minimumSeparation<=0
         ||!smokeValid
         ||!std::isfinite(s.emitterSettings.radianceScale)||s.emitterSettings.radianceScale<0||s.emitterSettings.radianceScale>100
         ||!std::isfinite(s.emitterSettings.offAxisGlow)||s.emitterSettings.offAxisGlow<0||s.emitterSettings.offAxisGlow>1
-        ||(sceneMode!="air"&&sceneMode!="floor"&&sceneMode!="occluders"&&sceneMode!="source-half"&&sceneMode!="source-occluded")){
+        ||(sceneMode!="air"&&sceneMode!="floor"&&sceneMode!="occluders"&&sceneMode!="source-half"&&sceneMode!="source-occluded"&&sceneMode!="glass")){
         std::fprintf(stderr,"Invalid viewport, light budget, --steps, --min-separation, --scene or --emitter settings\n");return 2;
     }
     s.width=static_cast<uint16_t>(windowWidth);s.height=static_cast<uint16_t>(windowHeight);
-    lightBudget={static_cast<uint16_t>(surfaceBudget),static_cast<uint8_t>(volumeBudget),static_cast<uint8_t>(shadowBudget)};
+    lightBudget={static_cast<uint16_t>(surfaceBudget),static_cast<uint8_t>(volumeBudget),static_cast<uint8_t>(shadowBudget),static_cast<uint16_t>(transparentDrawBudget),static_cast<uint8_t>(transparentObjectBudget)};
     if(!s.path.empty()&&!sequence::loadLightShow(s.path,data,&s.error)){std::fprintf(stderr,"%s\n",s.error.c_str());return 1;}
     if(areaShadows)for(auto& fixture:data.fixtures)for(auto& key:fixture.keys){key.value.shadow=true;key.value.areaShadow=true;}
     s.show=sequence::CompiledLightShow::compile(std::move(data),&s.error);if(!s.show)return 2;
@@ -846,6 +849,16 @@ int main(int argc,char** argv) {
     s.fog.noiseStrength=staticFog?0.f:.35f;s.fog.noiseScale=.2f;s.renderer.setVolumetricSettings(s.fog);
     const auto cube=s.renderer.createTexturedUnitCube();const auto material=s.renderer.createMaterialFromPhoskia(render::kPbrPhoskiaSource,"light_show_stage_pbr");
     s.renderer.setMaterialColor(material,"baseColor",.3f,.32f,.36f,1);s.renderer.setMaterialFloat(material,"roughness",.65f);
+    if(reflections){render::SsrSettings ssr;ssr.enabled=true;s.renderer.setSsrSettings(ssr);s.renderer.setMaterialFloat(material,"metallic",.95f);s.renderer.setMaterialFloat(material,"roughness",.08f);}
+    render::MeshHandle glassPlane;render::MaterialHandle glassMaterial;
+    if(sceneMode=="glass"){
+        struct V{float x,y,z,nx,ny,nz,u,v,tx,ty,tz,tw;};
+        const V vertices[]={{-4,0,-4,0,1,0,0,0,1,0,0,-1},{-4,0,4,0,1,0,0,1,1,0,0,-1},{4,0,4,0,1,0,1,1,1,0,0,-1},{4,0,-4,0,1,0,1,0,1,0,0,-1}};
+        const uint16_t indices[]={0,1,2,0,2,3};auto layout=render::VertexLayoutDesc::position3Normal3TexCoord2();layout.add({render::VertexAttribute::Tangent,4,render::VertexComponentType::Float,false});
+        glassPlane=s.renderer.createMesh(vertices,4,layout,indices,6);glassMaterial=s.renderer.createMaterialFromPhoskia(render::kPbrPhoskiaSource,"lighting_glass_preview");
+        s.renderer.setMaterialBlendMode(glassMaterial,render::BlendMode::Alpha);s.renderer.setMaterialColor(glassMaterial,"baseColor",.65f,.85f,1,1);s.renderer.setMaterialFloat(glassMaterial,"opacity",.35f);s.renderer.setMaterialFloat(glassMaterial,"roughness",.18f);s.renderer.setMaterialFloat(glassMaterial,"metallic",0);s.renderer.setMaterialFloat(glassMaterial,"ao",1);s.renderer.setMaterialFloat(glassMaterial,"normalYSign",1);
+        if(!glassPlane.isValid()||!glassMaterial.isValid()){s.renderer.shutdown();DestroyWindow(window);return 4;}
+    }
     const auto sourceOccluder=s.renderer.createMaterialFromPhoskia(render::kPbrPhoskiaSource,"source_occlusion_unlit");
     s.renderer.setMaterialColor(sourceOccluder,"baseColor",.005f,.006f,.008f,1);s.renderer.setMaterialModel(sourceOccluder,render::MaterialModel::Unlit);
     auto previous=std::chrono::steady_clock::now();
@@ -877,6 +890,7 @@ int main(int argc,char** argv) {
         math::Float4x4 view,projection;s.renderer.mainCameraMatrices(view,projection);
         render::RenderScene scene;
         if(sceneMode!="air")scene.add(cube,material,math::translate(0.f,-.2f,0.f)*math::scale(24.f,.4f,24.f));
+        if(sceneMode=="glass"){scene.add(glassPlane,glassMaterial,math::translate(0.f,1.2f,0.f));scene.add(glassPlane,glassMaterial,math::translate(2.f,2.4f,0.f));}
         if(sceneMode=="occluders")for(int i=0;i<5;++i)scene.add(cube,material,math::translate(float(i*3-6),1.5f,0)*math::scale(1.f,3.f,1.f));
         if(sceneMode=="source-occluded"||sceneMode=="source-half")
             scene.add(cube,sourceOccluder,math::translate(sceneMode=="source-half"?-2.f:0.f,7.f,-3.f)*math::scale(2.f,3.f,.3f));
@@ -926,13 +940,13 @@ int main(int argc,char** argv) {
         musicLoaded=s.music.loaded();
         if(musicLoaded)musicTime=double(s.music.engine.voicePositionFrames(s.music.voice))/s.music.engine.outputSampleRate();
 #endif
-        std::printf("{\"samples\":%zu,\"gpuSamples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"meanGpuMs\":%.4f,\"p95GpuMs\":%.4f,\"meanPresenterMs\":%.4f,\"meanRenderMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u,\"instancedPoints\":%s,\"showTimeSeconds\":%.4f,\"musicTimeSeconds\":%.4f,\"musicLoaded\":%s,\"pointLightCells\":%u,\"pointLights\":%u,\"pointLightBudgetSkipped\":%u,\"emitterPrepared\":%u,\"emitterBackFacing\":%u,\"emitterClamped\":%u}\n",
+        std::printf("{\"samples\":%zu,\"gpuSamples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"meanGpuMs\":%.4f,\"p95GpuMs\":%.4f,\"meanPresenterMs\":%.4f,\"meanRenderMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u,\"instancedPoints\":%s,\"showTimeSeconds\":%.4f,\"musicTimeSeconds\":%.4f,\"musicLoaded\":%s,\"pointLightCells\":%u,\"pointLights\":%u,\"pointLightBudgetSkipped\":%u,\"emitterPrepared\":%u,\"emitterBackFacing\":%u,\"emitterClamped\":%u,\"transparentLightDraws\":%u,\"transparentLightBudgetSkipped\":%u,\"transparentUnsupportedMaterials\":%u}\n",
             timings.size(),gpuTimings.size(),s.width,s.height-toolbarHeight,
             sum/timings.size(),timings[size_t((timings.size()-1)*.95)],gpuMean,gpuP95,
             presenterSum/presenterTimings.size(),renderSum/renderTimings.size(),
             stats.surfaceDraws,stats.volumeDraws,stats.volumeBudgetSkipped,
             pointStats.source,pointStats.visible,pointStats.budgetSkipped,
-            pointStats.instanced?"true":"false",s.player.time(),musicTime,musicLoaded?"true":"false",aggregate.occupiedCells,aggregate.selectedLights,aggregate.budgetSkipped,emitters.prepared,emitters.backFacing,emitters.clamped);
+            pointStats.instanced?"true":"false",s.player.time(),musicTime,musicLoaded?"true":"false",aggregate.occupiedCells,aggregate.selectedLights,aggregate.budgetSkipped,emitters.prepared,emitters.backFacing,emitters.clamped,stats.transparentDraws,stats.transparentBudgetSkipped,stats.transparentUnsupportedMaterials);
     }
     s.presenter.clearGoboTextures();
     for(auto& [name,asset]:s.iesAssets)s.renderer.destroyTexture(asset.texture);
