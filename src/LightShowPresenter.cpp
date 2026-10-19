@@ -60,8 +60,14 @@ bool LightShowPresenter::append(render::Renderer& renderer,render::RenderScene& 
     if(settings.maxLights>64){if(error)*error="Point light budget exceeds64";return false;}
     if(settings.maxLights>0){
         settings.maxLights=std::min<uint16_t>(settings.maxLights,uint16_t(256-_lights.size()));
-        if(!render::buildEmissivePointLights(_pointData,settings,_aggregateLights,aggregateStats,error))return false;
-    }else{_aggregateLights.clear();aggregateStats.source=uint32_t(_pointData.size());}
+        if(!std::isfinite(_pointLightingTransition)||_pointLightingTransition<0||_pointLightingTransition>1){if(error)*error="Invalid point lighting transition";return false;}
+        if(settings.smoothCells&&_pointLightingTransition>0){
+            if(!_pointLightingHistory.update(_pointData,settings,frame.time,_pointLightingTransition,_aggregateLights,aggregateStats,error))return false;
+        }else{
+            _pointLightingHistory.reset();
+            if(!render::buildEmissivePointLights(_pointData,settings,_aggregateLights,aggregateStats,error))return false;
+        }
+    }else{_pointLightingHistory.reset();_aggregateLights.clear();aggregateStats.source=uint32_t(_pointData.size());}
     for(auto light:_aggregateLights){
         uint32_t id=0;
         while(std::any_of(_lights.begin(),_lights.end(),[&](const auto& l){return l.id==id;}))++id;

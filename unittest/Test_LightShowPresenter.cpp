@@ -26,4 +26,19 @@ TEST_CASE(authored_fog_preserves_host_quality_reuses_atlas_and_leaves_legacy_med
  frame.fog.value.density=.2f;frame.fog.grid.reset();frame.fog.value.local=false;CHECK(presenter.append(renderer,scene,frame,identity,identity,64,64));CHECK(!renderer.volumetricDensityField().profile);CHECK(!renderer.volumetricSettings().local);
  frame.fog.authored=false;settings=renderer.volumetricSettings();settings.density=.07f;renderer.setVolumetricSettings(settings);CHECK(presenter.append(renderer,scene,frame,identity,identity,64,64));CHECK(renderer.volumetricSettings().density==.07f);renderer.shutdown();
 }
+TEST_CASE(point_lighting_history_is_optional_bounded_and_explicit_seek_reset_restores_preview) {
+ render::Renderer renderer;render::InitDesc init;init.backend=render::Backend::Noop;CHECK(renderer.initialize(init));
+ sequence::LightShowPresenter presenter;sequence::LightShowFrame frame;frame.points={{1,{0,0,0},{1,1,1},2,.05f},{2,{16,0,0},{1,1,1},1,.05f}};
+ render::EmissivePointLightingSettings settings;settings.maxLights=1;settings.smoothCells=true;settings.contactDistance=1;
+ presenter.setPointLighting(settings,.1f);const auto identity=math::Float4x4::identity();render::RenderScene scene;
+ render::EmissivePointSettings pointSettings;pointSettings.maxPoints=0;
+ CHECK(presenter.append(renderer,scene,frame,identity,identity,64,64,{},pointSettings));CHECK(presenter.pointLightingStats().historyReset);CHECK(presenter.pointLightingStats().selectedLights==1);CHECK(presenter.pointStats().visible==0);
+ frame.points[1].intensity=3;frame.time=.05;
+ CHECK(presenter.append(renderer,scene,frame,identity,identity,64,64,{},pointSettings));CHECK(presenter.pointLightingStats().fadingLights==1);CHECK(presenter.pointLightingStats().deferredCells==1);
+ presenter.resetPointLightingHistory();CHECK(presenter.append(renderer,scene,frame,identity,identity,64,64,{},pointSettings));CHECK(presenter.pointLightingStats().historyReset);CHECK(presenter.pointLightingStats().fadingLights==0);
+ frame.points[0].intensity=frame.points[1].intensity=0;frame.time=.06;
+ CHECK(presenter.append(renderer,scene,frame,identity,identity,64,64,{},pointSettings));CHECK(presenter.pointLightingStats().selectedLights==0);
+ settings.maxLights=0;presenter.setPointLighting(settings);CHECK(presenter.append(renderer,scene,frame,identity,identity,64,64,{},pointSettings));CHECK(presenter.pointLightingStats().source==2);CHECK(presenter.pointLightingStats().selectedLights==0);
+ renderer.shutdown();
+}
 TEST_SUITE_END

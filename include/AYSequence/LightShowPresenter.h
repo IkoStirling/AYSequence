@@ -40,7 +40,13 @@ public:
     /// Optional cell-based surface lighting. Budget0 keeps the original unlit
     /// point-cloud behavior. Fixture lights have priority; packet capacity256
     /// and surfaceLights budget are shared. Does not depend on maxPoints.
-    void setPointLighting(render::EmissivePointLightingSettings settings) noexcept { _pointLighting=settings; }
+    /// With smoothCells, transitionSeconds[0,1] enables bounded rank fades;
+    /// zero keeps stateless selection. Changing settings resets its history.
+    void setPointLighting(render::EmissivePointLightingSettings settings,float transitionSeconds=0) noexcept {
+        _pointLighting=settings;_pointLightingTransition=transitionSeconds;_pointLightingHistory.reset();
+    }
+    /// Reset bounded cell-rank fades after an authoring edit or explicit seek.
+    void resetPointLightingHistory() noexcept { _pointLightingHistory.reset(); }
     render::EmissivePointLightingStats pointLightingStats() const noexcept { return _pointLightingStats; }
     /// Optional visible, oriented HDR fixture exits. Default off preserves
     /// existing hosts. Uses Renderer medium settings and scene depth; intensity,
@@ -75,6 +81,8 @@ private:
     render::FixtureHousings _housings;
     render::EmissivePointCloud _points;
     render::EmissivePointLightingSettings _pointLighting{0};
+    float _pointLightingTransition=0;
+    render::EmissivePointLightingHistory _pointLightingHistory;
     render::EmissivePointLightingStats _pointLightingStats;
     std::vector<render::PerformanceLight> _aggregateLights;
     std::vector<render::PerformanceLight> _lights;

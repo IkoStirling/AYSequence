@@ -152,6 +152,7 @@ struct Studio {
     std::unordered_map<std::string,IesAsset> iesAssets;
     HWND keyLane=nullptr,keyDestination=nullptr,keyInterpolation=nullptr;
     render::EmissivePointLightingSettings pointLighting{0};
+    float pointTransitionSeconds=.15f;
     bool constantFlux=false,fixtureEmitters=true;
     render::FixtureEmitterSettings emitterSettings;
     render::LensEffectsSettings lens;
@@ -210,7 +211,7 @@ struct Studio {
         if(timeline)InvalidateRect(timeline,nullptr,FALSE);
     }
     void seekPreview(double seconds){
-        renderer.resetVolumetricHistory();
+        renderer.resetVolumetricHistory();presenter.resetPointLightingHistory();
         player.pause();player.seek(std::clamp(seconds,0.0,show->data().duration));
 #if defined(AY_LIGHTSHOW_AUDIO)
         music.seek(player.time());music.pause(true);
@@ -289,6 +290,7 @@ struct Studio {
         if(!next||!prepareGobos(*next,sourcePath))return false;
         const auto t=player.time();const bool playing=player.playing();
         if(keepHistory){undo.push_back({show,path});redo.clear();while(undo.size()>8)undo.pop_front();}
+        presenter.resetPointLightingHistory();renderer.resetVolumetricHistory();
         show=std::move(next);player.bind(show);
         path=sourcePath;player.seek(std::min(t,show->data().duration));if(playing)player.play();
 #if defined(AY_LIGHTSHOW_AUDIO)
@@ -496,7 +498,13 @@ struct Studio {
         if(id==CopyKey)editKeys(sequence::LightShowKeyEdit::Copy);
         if(id==RemoveKey)editKeys(sequence::LightShowKeyEdit::Remove);
         if(id==ApplyInterpolation)editKeys(sequence::LightShowKeyEdit::Interpolation);
-        if(id==TogglePointLights){pointLighting.maxLights=pointLighting.maxLights?0:16;presenter.setPointLighting(pointLighting);}
+        if(id==TogglePointLights){
+            if(!pointLighting.maxLights){pointLighting.maxLights=16;pointLighting.smoothCells=false;}
+            else if(!pointLighting.smoothCells)pointLighting.smoothCells=true;
+            else pointLighting.maxLights=0;
+            presenter.setPointLighting(pointLighting,pointLighting.smoothCells?pointTransitionSeconds:0);
+            SetDlgItemTextW(window,TogglePointLights,!pointLighting.maxLights?L"Point lights off":pointLighting.smoothCells?L"Point lights smooth":L"Point lights hard");
+        }
         if(id==ToggleFlux){constantFlux=!constantFlux;presenter.setConstantFlux(constantFlux);}
         if(id==ViewBoth)cameraMode=0;if(id==ViewStage)cameraMode=1;if(id==ViewSky)cameraMode=2;
         if(id==Play){
@@ -524,7 +532,7 @@ struct Studio {
                 }
             }
         }
-        if(id==Restart){player.stop();player.play();
+        if(id==Restart){presenter.resetPointLightingHistory();renderer.resetVolumetricHistory();player.stop();player.play();
 #if defined(AY_LIGHTSHOW_AUDIO)
             music.restart(true);
 #endif
@@ -708,6 +716,9 @@ int main(int argc,char** argv) {
         else if(arg=="--shadow-lights"&&i+1<argc)shadowBudget=std::stoul(argv[++i]);
         else if(arg=="--point-budget"&&i+1<argc){pointBudget=std::stoul(argv[++i]);pointExplicit=true;}
         else if(arg=="--point-lights"&&i+1<argc){const auto count=std::stoul(argv[++i]);if(count>64)return 1;s.pointLighting.maxLights=uint16_t(count);}
+        else if(arg=="--point-occlusion"&&i+1<argc)s.pointLighting.contactDistance=std::stof(argv[++i]);
+        else if(arg=="--point-smooth")s.pointLighting.smoothCells=true;
+        else if(arg=="--point-transition"&&i+1<argc)s.pointTransitionSeconds=std::stof(argv[++i]);
         else if(arg=="--point-light-cell"&&i+1<argc)s.pointLighting.cellSize=std::stof(argv[++i]);
         else if(arg=="--point-light-range"&&i+1<argc)s.pointLighting.range=std::stof(argv[++i]);
         else if(arg=="--point-light-scale"&&i+1<argc)s.pointLighting.intensityScale=std::stof(argv[++i]);
@@ -755,7 +766,7 @@ int main(int argc,char** argv) {
     const auto cleanLens=render::sanitizeLensEffects(s.lens);
     if(cleanLens.starStrength!=s.lens.starStrength||cleanLens.ghostStrength!=s.lens.ghostStrength||cleanLens.starLength!=s.lens.starLength||cleanLens.starRotation!=s.lens.starRotation||cleanLens.dispersion!=s.lens.dispersion||cleanLens.dirtStrength!=s.lens.dirtStrength
         ||!std::isfinite(s.exposureEV)||s.exposureEV< -16||s.exposureEV>6||!std::isfinite(s.adaptBright)||s.adaptBright<.01f||s.adaptBright>20||!std::isfinite(s.adaptDark)||s.adaptDark<.01f||s.adaptDark>20)return 2;
-    s.presenter.setPointLighting(s.pointLighting);s.presenter.setConstantFlux(s.constantFlux);s.presenter.setFixtureEmitters(s.fixtureEmitters,s.emitterSettings);
+    s.presenter.setPointLighting(s.pointLighting,s.pointLighting.smoothCells?s.pointTransitionSeconds:0);s.presenter.setConstantFlux(s.constantFlux);s.presenter.setFixtureEmitters(s.fixtureEmitters,s.emitterSettings);
     sequence::LightShow data=sequence::makeLightShowExample(fixtures,points);
     if(preset=="optics"){
         data=sequence::makeLightShowExample(1,0);auto& track=data.fixtures.front();track.sweepPan=track.sweepTilt=track.sweepFrequency=track.strobeFrequency=0;
@@ -789,6 +800,7 @@ int main(int argc,char** argv) {
     if(steps<8||steps>64||windowWidth<1280||windowWidth>8192||windowHeight<480||windowHeight>8192
         ||surfaceBudget>256||volumeBudget>64||shadowBudget>8||pointBudget>65536||transparentDrawBudget>1024||transparentObjectBudget>32
         ||!std::isfinite(s.minimumSeparation)||s.minimumSeparation<=0
+        ||!std::isfinite(s.pointTransitionSeconds)||s.pointTransitionSeconds<0||s.pointTransitionSeconds>1
         ||!std::isfinite(s.shutterSeconds)||s.shutterSeconds<0||s.shutterSeconds>1
         ||!smokeValid
         ||!std::isfinite(s.emitterSettings.radianceScale)||s.emitterSettings.radianceScale<0||s.emitterSettings.radianceScale>100
@@ -851,7 +863,7 @@ int main(int argc,char** argv) {
     for(const auto* label:{L"Step",L"Linear",L"Smooth"})SendMessageW(s.keyInterpolation,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(label));
     SendMessageW(s.keyInterpolation,CB_SETCURSEL,1,0);
     control(window,L"BUTTON",L"Set mode",ApplyInterpolation,777,112,90,26);
-    control(window,L"BUTTON",L"Point light on/off",TogglePointLights,875,112,160,26);
+    control(window,L"BUTTON",!s.pointLighting.maxLights?L"Point lights off":s.pointLighting.smoothCells?L"Point lights smooth":L"Point lights hard",TogglePointLights,875,112,160,26);
     control(window,L"BUTTON",L"Flux zoom on/off",ToggleFlux,1043,112,160,26);
     control(window,L"BUTTON",L"Emitters on/off",ToggleEmitters,8,146,150,26);
     control(window,L"BUTTON",L"Source front",SourceFront,166,146,130,26);
@@ -986,13 +998,13 @@ int main(int argc,char** argv) {
         musicLoaded=s.music.loaded();
         if(musicLoaded)musicTime=double(s.music.engine.voicePositionFrames(s.music.voice))/s.music.engine.outputSampleRate();
 #endif
-        std::printf("{\"samples\":%zu,\"gpuSamples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"meanGpuMs\":%.4f,\"p95GpuMs\":%.4f,\"meanPresenterMs\":%.4f,\"meanRenderMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u,\"instancedPoints\":%s,\"showTimeSeconds\":%.4f,\"musicTimeSeconds\":%.4f,\"musicLoaded\":%s,\"pointLightCells\":%u,\"pointLights\":%u,\"pointLightBudgetSkipped\":%u,\"emitterPrepared\":%u,\"emitterBackFacing\":%u,\"emitterClamped\":%u,\"transparentLightDraws\":%u,\"transparentLightBudgetSkipped\":%u,\"transparentUnsupportedMaterials\":%u,\"fogResolution\":%u,\"gpuProfiling\":%s,\"meanVolumeGpuMs\":%.4f,\"meanLightingGpuMs\":%.4f,\"meanShadowGpuMs\":%.4f,\"rigidInstancedDraws\":%u,\"rigidInstancedObjects\":%u,\"froxel\":%s,\"froxelWidth\":%u,\"froxelHeight\":%u,\"froxelSlices\":%u,\"froxelCells\":%u,\"volumeHistoryUsed\":%s,\"presenterStageSamples\":%zu,\"meanPrepareLightsMs\":%.4f,\"meanPreparePointDataMs\":%.4f,\"meanPointAggregationMs\":%.4f,\"meanUploadLightPacketMs\":%.4f,\"meanPrepareHousingsMs\":%.4f,\"meanPreparePointDrawsMs\":%.4f,\"meanPrepareEmittersMs\":%.4f,\"meanPrepareFogMs\":%.4f,\"authoredFogKeys\":%zu,\"densityGridBound\":%s,\"densityGridCells\":%zu,\"shutterSeconds\":%.6f}\n",
+        std::printf("{\"samples\":%zu,\"gpuSamples\":%zu,\"width\":%u,\"height\":%u,\"meanFrameMs\":%.4f,\"p95FrameMs\":%.4f,\"meanGpuMs\":%.4f,\"p95GpuMs\":%.4f,\"meanPresenterMs\":%.4f,\"meanRenderMs\":%.4f,\"surfaceDraws\":%u,\"volumeDraws\":%u,\"volumeBudgetSkipped\":%u,\"sourcePoints\":%u,\"visiblePoints\":%u,\"pointBudgetSkipped\":%u,\"instancedPoints\":%s,\"showTimeSeconds\":%.4f,\"musicTimeSeconds\":%.4f,\"musicLoaded\":%s,\"pointLightCells\":%u,\"pointLights\":%u,\"pointLightBudgetSkipped\":%u,\"emitterPrepared\":%u,\"emitterBackFacing\":%u,\"emitterClamped\":%u,\"transparentLightDraws\":%u,\"transparentLightBudgetSkipped\":%u,\"transparentUnsupportedMaterials\":%u,\"fogResolution\":%u,\"gpuProfiling\":%s,\"meanVolumeGpuMs\":%.4f,\"meanLightingGpuMs\":%.4f,\"meanShadowGpuMs\":%.4f,\"rigidInstancedDraws\":%u,\"rigidInstancedObjects\":%u,\"froxel\":%s,\"froxelWidth\":%u,\"froxelHeight\":%u,\"froxelSlices\":%u,\"froxelCells\":%u,\"volumeHistoryUsed\":%s,\"presenterStageSamples\":%zu,\"meanPrepareLightsMs\":%.4f,\"meanPreparePointDataMs\":%.4f,\"meanPointAggregationMs\":%.4f,\"meanUploadLightPacketMs\":%.4f,\"meanPrepareHousingsMs\":%.4f,\"meanPreparePointDrawsMs\":%.4f,\"meanPrepareEmittersMs\":%.4f,\"meanPrepareFogMs\":%.4f,\"authoredFogKeys\":%zu,\"densityGridBound\":%s,\"densityGridCells\":%zu,\"shutterSeconds\":%.6f,\"pointSmoothCells\":%s,\"pointFadingLights\":%u,\"pointDeferredCells\":%u}\n",
             timings.size(),gpuTimings.size(),s.width,s.height-toolbarHeight,
             sum/timings.size(),timings[size_t((timings.size()-1)*.95)],gpuMean,gpuP95,
             presenterSum/presenterTimings.size(),renderSum/renderTimings.size(),
             stats.surfaceDraws,stats.volumeDraws,stats.volumeBudgetSkipped,
             pointStats.source,pointStats.visible,pointStats.budgetSkipped,
-            pointStats.instanced?"true":"false",s.player.time(),musicTime,musicLoaded?"true":"false",aggregate.occupiedCells,aggregate.selectedLights,aggregate.budgetSkipped,emitters.prepared,emitters.backFacing,emitters.clamped,stats.transparentDraws,stats.transparentBudgetSkipped,stats.transparentUnsupportedMaterials,unsigned(s.fog.downsample),profileGpu?"true":"false",gpuPassTotals["Volumetric"]/std::max<size_t>(1,gpuTimings.size()),gpuPassTotals["Lighting"]/std::max<size_t>(1,gpuTimings.size()),gpuPassTotals["Shadow"]/std::max<size_t>(1,gpuTimings.size()),s.renderer.getFrameStats().instancedDrawCalls,s.renderer.getFrameStats().instancedObjects,s.renderer.getFrameStats().volumetric.froxel?"true":"false",unsigned(s.renderer.getFrameStats().volumetric.integrationWidth),unsigned(s.renderer.getFrameStats().volumetric.integrationHeight),unsigned(s.renderer.getFrameStats().volumetric.depthSlices),s.renderer.getFrameStats().volumetric.froxelCells,s.renderer.getFrameStats().volumetric.historyUsed?"true":"false",presenterStageSamples,presenterStageTotals[0]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[1]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[2]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[3]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[4]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[5]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[6]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[7]/std::max<size_t>(1,presenterStageSamples),s.show->data().fog.keys.size(),s.renderer.volumetricDensityField().profile?"true":"false",s.show->data().fog.grid.values.size(),s.shutterSeconds);
+            pointStats.instanced?"true":"false",s.player.time(),musicTime,musicLoaded?"true":"false",aggregate.occupiedCells,aggregate.selectedLights,aggregate.budgetSkipped,emitters.prepared,emitters.backFacing,emitters.clamped,stats.transparentDraws,stats.transparentBudgetSkipped,stats.transparentUnsupportedMaterials,unsigned(s.fog.downsample),profileGpu?"true":"false",gpuPassTotals["Volumetric"]/std::max<size_t>(1,gpuTimings.size()),gpuPassTotals["Lighting"]/std::max<size_t>(1,gpuTimings.size()),gpuPassTotals["Shadow"]/std::max<size_t>(1,gpuTimings.size()),s.renderer.getFrameStats().instancedDrawCalls,s.renderer.getFrameStats().instancedObjects,s.renderer.getFrameStats().volumetric.froxel?"true":"false",unsigned(s.renderer.getFrameStats().volumetric.integrationWidth),unsigned(s.renderer.getFrameStats().volumetric.integrationHeight),unsigned(s.renderer.getFrameStats().volumetric.depthSlices),s.renderer.getFrameStats().volumetric.froxelCells,s.renderer.getFrameStats().volumetric.historyUsed?"true":"false",presenterStageSamples,presenterStageTotals[0]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[1]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[2]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[3]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[4]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[5]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[6]/std::max<size_t>(1,presenterStageSamples),presenterStageTotals[7]/std::max<size_t>(1,presenterStageSamples),s.show->data().fog.keys.size(),s.renderer.volumetricDensityField().profile?"true":"false",s.show->data().fog.grid.values.size(),s.shutterSeconds,s.pointLighting.smoothCells?"true":"false",aggregate.fadingLights,aggregate.deferredCells);
     }
     s.presenter.clearGoboTextures();
     for(auto& [name,asset]:s.iesAssets)s.renderer.destroyTexture(asset.texture);

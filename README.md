@@ -428,3 +428,30 @@ opts into exposure integration (instant/8.33ms/16.67ms); default instant, schema
 The same fixture intensity feeds surface, volume and source aperture emission.
 
 Shutter validation:5 cases/122 assertions; full Sequence119/4141 and119-case inventory passed. D3D11/D3D12 hidden45-frame Studio passed; NaN shutter rejected with exit2.
+
+### 连续点阵聚合与有界排名过渡
+
+EmissivePointLightingSettings.smoothCells默认false；true把RGB按三线性权重分给8个固定世界网格节点。
+预算/钳制前保持RGB和位置一阶矩，±100000世界边界节点截断除外；不再跨硬桶突变，不能保证预算裁剪后能量守恒。
+范围扩展sqrt(3)*cellSize并受10000总上限约束；最多524288候选节点，最多64灯，仍独立于可见点数预算。
+EmissivePointLightingHistory::update接收time和transitionSeconds[0,1]，只用于smoothCells。
+最多maxLights个槽，旧节点先淡出释放，再准入新节点淡入；可能出现短暂能量降低，保持原RGB不改变色相。
+同时间不推进，逆时/超过.25秒缺帧/配置变化重置；全黑立即清空。显式seek/编辑调用reset；默认无历史。
+Presenter setPointLighting(settings,transitionSeconds=0)保留原路径，可显式resetPointLightingHistory；Studio跳播会重置。
+Studio --point-smooth、--point-transition秒，点照明按钮按off/hard/smooth循环；不改变schema8。
+
+Point PerformanceLight可选pointContactDistance[0,10]、pointContactThickness[.001,5]、pointContactBias[0,.5]、pointContactStrength[0,1]。
+距离0默认关闭；EmissivePointLightingSettings的contact*复制到聚合灯。共享不透明/标准透明受光绑定执行最多8次采样。
+使用当前GBuffer世界位置/覆盖率沿向光方向短距追踪，比较相机空间前向深度以判断可见遮挡；厚度和偏移是世界单位。
+只检测当前视图中的不透明遮挡，不能处理离屏、背面、多层透明或完整点光阴影；不占cube/Spot shadow槽。
+Studio --point-occlusion距离显式开启。现有Spot必须保持pointContactDistance=0。
+
+2026-10-20 continuous-point validation: Contracts175/2321, Sequence120/4157,
+SceneMaterial79/10042, PostProcess252/1363, Shader12/213 (73 production variants) passed.
+D3D11/D3D12 coherent-perspective contact probes each1/376; legacy point surface each1/139.
+D3D12 combined Studio45 frames:1000 visible points,16 lights,froxel/history,16.67ms shutter.
+Inventory: Renderer1043/10 partitions, Sequence120/3. SDK129/53/97 search/565 symbols,0 errors/warnings.
+Debug/D3D11 1920x828,64 fixtures/10k points,16 aggregate lights,80 surface/12 volume/4 shadow,
+24 steps,90 samples: initial smooth aggregation25.8929ms; cached smooth5.3723ms.
+Final hard/smooth/contact aggregation4.1573/5.3723/7.3837ms, GPU11.4194/12.6907/15.6380ms.
+All retain10k visible instances/16 lights. Process timing varies; no universal FPS claim.
