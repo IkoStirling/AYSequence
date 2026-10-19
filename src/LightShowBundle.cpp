@@ -41,14 +41,18 @@ bool exportLightShowBundle(const std::string& sourceShowPath,const std::string& 
     if(ec)return fail(error,"Cannot resolve the source show folder");
     std::set<fs::path> assets;
     for(const auto& fixture:show.fixtures){
-        if(std::none_of(fixture.keys.begin(),fixture.keys.end(),[](const auto& key){return key.value.gobo==ShowGobo::Texture;}))continue;
-        const auto relative=fs::u8path(fixture.goboTexturePath).lexically_normal();
+        std::vector<std::string> references;
+        if(std::any_of(fixture.keys.begin(),fixture.keys.end(),[](const auto& key){return key.value.gobo==ShowGobo::Texture;}))references.push_back(fixture.goboTexturePath);
+        if(!fixture.iesProfilePath.empty())references.push_back(fixture.iesProfilePath);
+        for(const auto& reference:references){
+        const auto relative=fs::u8path(reference).lexically_normal();
         if(!relativeAsset(relative)||relative==fs::path("bundle.json")||relative==source.filename())
             return fail(error,"Invalid bundled Gobo path");
         const auto resolved=fs::canonical(sourceBase/relative,ec);
         if(ec||!inside(resolved,sourceBase)||!fs::is_regular_file(resolved))
             return fail(error,"Gobo image is missing or leaves the source folder");
         assets.insert(relative);
+        }
     }
     fs::path musicSource,musicRelative;
     if(!musicPath.empty()){

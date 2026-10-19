@@ -2,9 +2,9 @@
 #include <AYSequence/LightShow.h>
 #include <string_view>
 namespace ayt::sequence {
-/// Strict schema4 authoring.light-show JSON, .lshow. Reads schema1 with zero
+/// Strict schema5 authoring.light-show JSON, .lshow. Reads schema1 with zero
 /// aperture, schema1/2 with sharp full-open pattern optics and schema1/2/3
-/// with empty Gobo path and zero shadow softness; writes schema4. Reject unknown/missing
+/// with empty Gobo path and zero shadow softness; with schema1..4 using Legacy intensity and no IES; writes schema5. Reject unknown/missing
 /// fields, duplicate keys, nesting>32, bytes>128MiB and invalid runtime values.
 /// Failure preserves output. Explicit loose files; no automatic cook/loader.
 bool decodeLightShow(std::string_view bytes,LightShow& output,std::string* error=nullptr);

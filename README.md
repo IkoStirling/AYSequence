@@ -3,7 +3,7 @@
 ## 灯光与发光点演出（2026-10-16）
 
 LightShow.h提供独立的owned快照、灯具键/扫动/频闪、稳定ID点阵编队和绝对时间播放器。
-LightShowAssetIO.h写严格schema4的.lshow JSON，读取schema1时出光口半径置零，
+LightShowAssetIO.h写严格schema5的.lshow JSON，读取schema1时出光口半径置零，
 读取schema1/2时图案焦点清晰且光阑全开，读取schema1/2/3时Gobo贴图路径为空，AYIO原子保存。
 灯具支持有限出光口半径、聚光核心半角和外层发散半角；默认窄角、无图案。
 图案柔焦/光阑可关键帧插值。Texture Gobo使用灯具级相对贴图路径，
@@ -240,3 +240,23 @@ Studio默认开启，Emitters on/off切换；Source front/side/back对准首灯�
 --emitter-glow分别设置HDR标定比例与微弱侧向辉光。隐藏JSON的emitterPrepared/emitterBackFacing/emitterClamped
 报告CPU准备、背向和HDR夹取数量，不代表深度遮挡后的实际可见灯口数。
 发光口是近似圆盘；不模拟灯体外壳、镜片Gobo像、星芒或镜头鬼影。
+
+
+## 2026-10-19 光度与IES
+
+PerformanceLight.intensityUnit支持Legacy/Candela/Lumen；Legacy保留历史表现，物理模式以米为世界尺度，
+颜色按Rec.709线性亮度归一化（黑色无光），表面/体积/可见灯口共用performanceLightIntensity。
+Lumen以smoothstep光锥与峰值归一化IES的有效立体角换算，iris/Gobo是后续吸收；
+Candela直接指定峰值方向强度。constantFlux只对Legacy生效。有限口径近场、range截断和RGB色谱仍是近似。
+illuminanceLux提供无截断无遮挡的cd×cos/r²诊断，不把显示器像素宣称为测光仪。
+
+IesProfile::parse只接受LM-63-1995/2002/2019、Type C、TILT=NONE、ballast字段均为1；
+最多4MiB/262144测量样本，严格递增角度，支持旋转/90°/180°/360°对称，360°接缝需一致。
+不支持Type A/B、外部/内嵌TILT或非单位ballast；失败保留旧对象。颜色不由IES指定。
+createIesTexture上传257×129线性RGBA8角度图，CPU灯口与GPU表面/体积共享坐标基；
+8bit峰值归一化会量化极弱旁瓣。Host配对不可变profile与存活atlas，Renderer检查句柄后复制灯包。
+有效立体角以128点余弦空间求积，水平角均值由原始采样分段线性积分；极窄IES尖峰需提高采样质量。
+
+.lshow写schema5，旧schema1..4补Legacy与空iesProfilePath，旧版本夹带新字段拒绝。
+FixtureTrack.iesProfilePath是相对路径；Presenter用bindIesProfile绑定，缺少必需绑定在替换灯包前失败。
+Studio提供IES文件选择、灯具单位属性与缓存；Save As检查新目录的依赖，资源包复制引用IES。

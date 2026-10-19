@@ -52,7 +52,7 @@ bool fixtureValid(const FixtureState& s) {
         && finite(s.shadowSoftness,0,4)
         && finite(s.goboRotation,-100000,100000) && finite(s.goboScale,.01f,100)
         && finite(s.goboFocus,0,1) && finite(s.iris,.01f,1)
-        && s.gobo <= ShowGobo::Texture;
+        && s.gobo <= ShowGobo::Texture && s.intensityUnit <= ShowIntensityUnit::Lumen;
 }
 }
 
@@ -78,6 +78,8 @@ std::shared_ptr<const CompiledLightShow> CompiledLightShow::compile(LightShow da
                 || std::find(path.begin(),path.end(),std::filesystem::path("..")) != path.end())
                 return fail("Gobo texture path must stay relative to the show");
         }
+        if(track.iesProfilePath.size()>1024||track.iesProfilePath.find(char(0))!=std::string::npos)return fail("Invalid IES path");
+        if(!track.iesProfilePath.empty()){const auto p=std::filesystem::u8path(track.iesProfilePath);if(p.is_absolute()||p.has_root_name()||p.has_root_directory()||std::find(p.begin(),p.end(),std::filesystem::path(".."))!=p.end())return fail("IES path must stay relative to the show");}
         samples += track.keys.size();
         if (samples > 1000000) return fail("Show sample budget exceeded");
         if (!finite(track.sweepPan,-100,100) || !finite(track.sweepTilt,-100,100)
@@ -134,7 +136,7 @@ bool CompiledLightShow::evaluate(double time, LightShowFrame& out, bool procedur
             if (cycle - std::floor(cycle) >= track.strobeDuty) state.intensity = 0;
         }
         }
-        out.fixtures[i] = {track.id,state};
+        out.fixtures[i] = {track.id,state,!track.iesProfilePath.empty()};
     }
     if (_data.formations.empty()) { out.points.clear(); return true; }
     const auto a = lowerKey(_data.formations,time), b = std::min(a+1,_data.formations.size()-1);

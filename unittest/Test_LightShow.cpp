@@ -234,14 +234,20 @@ TEST_CASE(roundtrip_preserves_lights_formations_patterns_and_absolute_time) {
 }
 TEST_CASE(schema1_through_3_migrate_optics_and_texture_path) {
     std::string bytes,error;CHECK(encodeLightShow(showFixture(),bytes));LightShow output;
-    CHECK(bytes.find("\"version\": 4")!=std::string::npos);
+    CHECK(bytes.find("\"version\": 5")!=std::string::npos);
     const auto removeField=[](std::string& document,const char* field){
         size_t at=0;
         while((at=document.find(field,at))!=std::string::npos){
             const auto end=document.find(',',at);document.erase(at,end+1-at);
         }
     };
-    auto legacy=bytes;legacy.replace(legacy.find("\"version\": 4"),12,"\"version\": 3");
+    auto legacy=bytes;legacy.replace(legacy.find("\"version\": 5"),12,"\"version\": 4");
+    CHECK(!decodeLightShow(legacy,output,&error));
+    removeField(legacy,"\"intensityUnit\"");removeField(legacy,"\"iesProfilePath\"");
+    CHECK(decodeLightShow(legacy,output,&error));
+    CHECK(output.fixtures[0].keys[0].value.intensityUnit==ShowIntensityUnit::Legacy);
+    CHECK(output.fixtures[0].iesProfilePath.empty());
+    legacy.replace(legacy.find("\"version\": 4"),12,"\"version\": 3");
     CHECK(!decodeLightShow(legacy,output,&error));
     removeField(legacy,"\"goboTexturePath\"");removeField(legacy,"\"shadowSoftness\"");
     CHECK(decodeLightShow(legacy,output,&error));
@@ -257,7 +263,7 @@ TEST_CASE(schema1_through_3_migrate_optics_and_texture_path) {
     CHECK(!decodeLightShow(legacy,output,&error)); // v2 aperture is not legal in v1.
     removeField(legacy,"\"apertureRadius\"");CHECK(decodeLightShow(legacy,output,&error));
     for(const auto& key:output.fixtures[0].keys)CHECK(key.value.apertureRadius==0);
-    CHECK(encodeLightShow(output,legacy));CHECK(legacy.find("\"version\": 4")!=std::string::npos);
+    CHECK(encodeLightShow(output,legacy));CHECK(legacy.find("\"version\": 5")!=std::string::npos);
     removeField(bytes,"\"apertureRadius\"");CHECK(!decodeLightShow(bytes,output,&error));
     CHECK(output.fixtures[0].keys[0].value.apertureRadius==0); // failed decode preserves output.
 }
@@ -318,5 +324,26 @@ TEST_CASE(bundle_rejects_missing_assets_without_publishing) {
     CHECK(!exportLightShowBundle(showPath.string(),bundle.string(),{},&error));
     CHECK(!std::filesystem::exists(bundle));
     CHECK(bundledLightShowMusic(showPath.string(),music,&error));CHECK(music.empty());
+}
+TEST_SUITE_END
+
+TEST_SUITE(LightShowPhotometryTests)
+TEST_CASE(physical_units_and_relative_ies_roundtrip_and_evaluate) {
+    auto data=showFixture();auto& track=data.fixtures[0];track.iesProfilePath="profiles/spot.ies";
+    track.keys[0].value.intensityUnit=ShowIntensityUnit::Lumen;
+    auto compiled=CompiledLightShow::compile(data);CHECK(compiled!=nullptr);if(!compiled)return;
+    LightShowFrame frame;CHECK(compiled->evaluate(0,frame));CHECK(frame.fixtures[0].requiresIes);CHECK(frame.fixtures[0].value.intensityUnit==ShowIntensityUnit::Lumen);
+    std::string bytes;CHECK(encodeLightShow(data,bytes));LightShow copy;CHECK(decodeLightShow(bytes,copy));CHECK(copy.fixtures[0].iesProfilePath=="profiles/spot.ies");
+    track.iesProfilePath="../escape.ies";CHECK(!CompiledLightShow::compile(data));
+    track.iesProfilePath="C:/absolute.ies";CHECK(!CompiledLightShow::compile(data));
+    track.iesProfilePath="profiles/spot.ies";track.keys[0].value.intensityUnit=static_cast<ShowIntensityUnit>(255);CHECK(!CompiledLightShow::compile(data));
+}
+TEST_CASE(bundle_includes_ies_and_rejects_missing_profile) {
+    ayt::test::ScratchDirectory scratch("light-show-ies-bundle");const auto root=scratch.path();
+    auto data=showFixture();data.fixtures[0].iesProfilePath="spot.ies";
+    const auto source=root/"show.lshow",bundle=root/"export";CHECK(saveLightShow(source.string(),data));
+    CHECK(!exportLightShowBundle(source.string(),bundle.string(),{}));CHECK(!std::filesystem::exists(bundle));
+    {std::ofstream file(root/"spot.ies");file<<"profile";}
+    CHECK(exportLightShowBundle(source.string(),bundle.string(),{}));CHECK(std::filesystem::exists(bundle/"spot.ies"));
 }
 TEST_SUITE_END

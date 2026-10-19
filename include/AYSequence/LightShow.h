@@ -12,6 +12,7 @@ namespace ayt::sequence {
 
 using ShowVec3 = std::array<float, 3>;
 enum class ShowInterpolation : std::uint8_t { Step, Linear, Smooth };
+enum class ShowIntensityUnit : std::uint8_t { Legacy, Candela, Lumen };
 enum class ShowGobo : std::uint8_t { Open, Stripes, Grid, Ring, Star, Texture };
 
 struct FixtureState {
@@ -21,7 +22,7 @@ struct FixtureState {
     float intensity = 30, range = 30;
     /// Core and outer field half angles in radians. The region between them
     /// fades smoothly; each radius = apertureRadius + distance * tan(angle).
-    /// cos(inner) >= cos(outer) + 1e-6. Intensity is not a constant-flux model.
+    /// cos(inner) >= cos(outer) + 1e-6. Legacy intensity is not a constant-flux model; Lumen is normalized.
     float innerAngle = 0.035f, outerAngle = 0.05236f;
     float volumetric = 1;
     float goboRotation = 0, goboScale = 1;
@@ -33,6 +34,8 @@ struct FixtureState {
     float apertureRadius = 0.035f;
     /// Optional bounded 2x2 shadow filter radius in atlas texels, [0,4].
     float shadowSoftness = 0;
+    /// Schema5: physical units assume meters; Legacy preserves previous shows.
+    ShowIntensityUnit intensityUnit = ShowIntensityUnit::Legacy;
 };
 struct FixtureKey {
     double time = 0;
@@ -48,6 +51,8 @@ struct FixtureTrack {
     /// Optional UTF-8 texture path relative to the .lshow file. Required by
     /// Texture keys; the host loads and binds it before presenting frames.
     std::string goboTexturePath;
+    /// Optional relative Type C IES file; host binds its immutable profile/atlas.
+    std::string iesProfilePath;
 };
 struct ShowPoint {
     std::uint32_t id = 0;
@@ -68,7 +73,7 @@ struct LightShow {
     std::vector<FixtureTrack> fixtures;
     std::vector<FormationKey> formations;
 };
-struct EvaluatedFixture { std::uint32_t id = 0; FixtureState value; };
+struct EvaluatedFixture { std::uint32_t id = 0; FixtureState value; bool requiresIes = false; };
 struct LightShowFrame {
     double time = 0;
     std::vector<EvaluatedFixture> fixtures;

@@ -16,6 +16,10 @@ public:
     /// Session presentation option, not serialized. Apply the same approximate
     /// angular-flux zoom model to all fixtures; see PerformanceLight::constantFlux.
     void setConstantFlux(bool enabled) noexcept { _constantFlux=enabled; }
+    /// Pair the parsed immutable IES and Renderer-owned angular atlas for a
+    /// fixture. A configured but missing binding fails before packet replacement.
+    void bindIesProfile(std::uint32_t id,std::shared_ptr<const render::IesProfile> profile,render::TextureHandle atlas);
+    void clearIesProfiles() noexcept { _iesProfiles.clear(); }
     void clearGoboTextures() noexcept { _goboTextures.clear(); }
     bool append(render::Renderer& renderer,render::RenderScene& scene,const LightShowFrame& frame,
         const math::Float4x4& view,const math::Float4x4& projection,uint16_t width,uint16_t height,
@@ -35,6 +39,8 @@ public:
     render::EmissivePointStats pointStats() const noexcept { return _points.stats(); }
 private:
     std::unordered_map<std::uint32_t,render::TextureHandle> _goboTextures;
+    struct IesBinding {std::shared_ptr<const render::IesProfile> profile;render::TextureHandle atlas;};
+    std::unordered_map<std::uint32_t,IesBinding> _iesProfiles;
     bool _constantFlux=false,_fixtureEmittersEnabled=false;
     render::FixtureEmitterSettings _fixtureEmitterSettings;
     render::FixtureEmitters _emitters;

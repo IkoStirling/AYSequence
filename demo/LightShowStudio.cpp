@@ -24,6 +24,7 @@
 #include <cwchar>
 #include <deque>
 #include <filesystem>
+#include <fstream>
 #include <numbers>
 #include <set>
 #include <unordered_map>
@@ -31,7 +32,7 @@
 using namespace ayt;
 namespace {
 constexpr int toolbarHeight=252;
-enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle,ToggleFogMotion,KeyLane,KeyDestination,KeyInterpolation,MoveKey,CopyKey,RemoveKey,ApplyInterpolation,PreviousKey,NextKey,TogglePointLights,ToggleFlux,ToggleEmitters,SourceFront,SourceSide,SourceBack };
+enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle,ToggleFogMotion,KeyLane,KeyDestination,KeyInterpolation,MoveKey,CopyKey,RemoveKey,ApplyInterpolation,PreviousKey,NextKey,TogglePointLights,ToggleFlux,ToggleEmitters,SourceFront,SourceSide,SourceBack,LoadIes };
 struct ShowRevision { std::shared_ptr<const sequence::CompiledLightShow> show; std::string path; };
 #if defined(AY_LIGHTSHOW_AUDIO)
 // Studio-only bridge: the decoded clip's playback head is the show clock.
@@ -142,6 +143,8 @@ struct Studio {
     MusicTransport music;
 #endif
     std::unordered_map<std::string,render::TextureHandle> goboTextures;
+    struct IesAsset {std::shared_ptr<const render::IesProfile> profile;render::TextureHandle texture;};
+    std::unordered_map<std::string,IesAsset> iesAssets;
     HWND keyLane=nullptr,keyDestination=nullptr,keyInterpolation=nullptr;
     render::EmissivePointLightingSettings pointLighting{0};
     bool constantFlux=false,fixtureEmitters=true;
@@ -213,6 +216,7 @@ struct Studio {
             case 13:number=v;break;case 14:number=.01+.99*v;break;
             case 15:number=.25+3.75*v;break;
             case 16:number=4*v;suffix=L" px";break;
+            case 17:number=std::min(2,int(v*3));break;
         }
         wchar_t text[64];swprintf_s(text,L"%.3g%ls",number,suffix);SetWindowTextW(valueReadout,text);
     }
@@ -245,6 +249,21 @@ struct Studio {
             }
             bindings.emplace_back(fixture.id,found->second);
         }
+        std::vector<std::pair<uint32_t,IesAsset>> iesBindings;
+        for(const auto& fixture:next.data().fixtures)if(!fixture.iesProfilePath.empty()){
+            if(sourcePath.empty()){error="Save the show before importing IES";return false;}
+            const auto resolved=(std::filesystem::absolute(std::filesystem::path(sourcePath)).parent_path()/std::filesystem::u8path(fixture.iesProfilePath)).lexically_normal();
+            const auto key=resolved.string();auto found=iesAssets.find(key);
+            if(found==iesAssets.end()){
+                std::error_code ec;const auto size=std::filesystem::file_size(resolved,ec);if(ec||size>4*1024*1024){error="Missing or oversized IES: "+key;return false;}
+                std::ifstream file(resolved,std::ios::binary);std::string bytes(size,char(0));if(!file.read(bytes.data(),std::streamsize(size))){error="Cannot read IES: "+key;return false;}
+                auto profile=std::make_shared<render::IesProfile>();if(!render::IesProfile::parse(bytes,*profile,&error))return false;
+                const auto texture=render::createIesTexture(renderer,*profile);if(!texture.isValid()){error="Cannot upload IES atlas";return false;}
+                found=iesAssets.emplace(key,IesAsset{profile,texture}).first;
+            }
+            iesBindings.emplace_back(fixture.id,found->second);
+        }
+        presenter.clearIesProfiles();for(const auto& [id,asset]:iesBindings)presenter.bindIesProfile(id,asset.profile,asset.texture);
         presenter.clearGoboTextures();
         for(const auto& [id,texture]:bindings)presenter.bindGoboTexture(id,texture);
         error.clear();return true;
@@ -291,6 +310,7 @@ struct Studio {
                 case 14:state.iris=.01f+.99f*v;break;
                 case 15:state.goboScale=.25f+3.75f*v;break;
                 case 16:state.shadowSoftness=4*v;break;
+                case 17:state.intensityUnit=static_cast<sequence::ShowIntensityUnit>(std::min(2,int(v*3)));break;
             }
             const double time=player.time();
             auto found=std::lower_bound(track.keys.begin(),track.keys.end(),time,[](const auto& k,double t){return k.time<t;});
@@ -326,6 +346,7 @@ struct Studio {
         if(save){
             const auto base=std::filesystem::absolute(std::filesystem::path(selected)).parent_path();
             for(const auto& fixture:show->data().fixtures) {
+                if(!fixture.iesProfilePath.empty()&&!std::filesystem::exists(base/std::filesystem::u8path(fixture.iesProfilePath))){error="Copy IES profiles beside the new .lshow location before Save As";MessageBoxA(window,error.c_str(),"Save light show",MB_OK|MB_ICONWARNING);return;}
                 if(std::none_of(fixture.keys.begin(),fixture.keys.end(),[](const auto& key){return key.value.gobo==sequence::ShowGobo::Texture;}))continue;
                 if(!std::filesystem::exists(base/std::filesystem::u8path(fixture.goboTexturePath))) {
                     error="Copy Gobo images beside the new .lshow location before Save As";
@@ -396,6 +417,29 @@ struct Studio {
         edit(std::move(data));
         if(!error.empty())MessageBoxA(window,error.c_str(),"Gobo image",MB_OK|MB_ICONWARNING);
     }
+    void loadIes() {
+        if(path.empty()){MessageBoxW(window,L"Save the .lshow file first.",L"IES profile",MB_OK|MB_ICONINFORMATION);return;}
+        wchar_t filename[32768]{};
+        OPENFILENAMEW dialog{};dialog.lStructSize=sizeof(dialog);dialog.hwndOwner=window;
+        dialog.lpstrFilter=L"IES photometry (*.ies)\0*.ies\0\0";
+        dialog.lpstrFile=filename;dialog.nMaxFile=static_cast<DWORD>(std::size(filename));
+        dialog.Flags=OFN_NOCHANGEDIR|OFN_PATHMUSTEXIST|OFN_FILEMUSTEXIST;
+        if(!GetOpenFileNameW(&dialog))return;
+        const auto base=std::filesystem::absolute(std::filesystem::path(path)).parent_path();
+        const auto relative=std::filesystem::path(filename).lexically_relative(base);
+        if(relative.empty()||relative.is_absolute()||std::find(relative.begin(),relative.end(),std::filesystem::path(".."))!=relative.end()) {
+            MessageBoxW(window,L"Choose a profile inside the .lshow folder or a child folder.",L"IES profile",MB_OK|MB_ICONWARNING);return;
+        }
+        const auto selected=SendMessageW(target,CB_GETCURSEL,0,0);
+        if(selected<0||size_t(selected)>=targetMembers.size())return;
+        auto data=show->data();
+        for(const auto index:targetMembers[size_t(selected)]) {
+            auto& track=data.fixtures[index];track.iesProfilePath=relative.generic_string();
+
+        }
+        edit(std::move(data));
+        if(!error.empty())MessageBoxA(window,error.c_str(),"IES profile",MB_OK|MB_ICONWARNING);
+    }
 #if defined(AY_LIGHTSHOW_AUDIO)
     void loadMusic(){
         wchar_t filename[32768]{};
@@ -452,6 +496,7 @@ struct Studio {
         }
         if(id==Open)file(false);if(id==Save)file(true);if(id==ExportBundle)exportBundle();if(id==AddKey)key();
         if(id==LoadGobo)loadGobo();
+        if(id==LoadIes)loadIes();
 #if defined(AY_LIGHTSHOW_AUDIO)
         if(id==LoadMusic)loadMusic();
         if(id==ClearMusic)music.clear();
@@ -676,7 +721,7 @@ int main(int argc,char** argv) {
     s.time=control(window,TRACKBAR_CLASSW,L"",Time,950,4,280,28,TBS_NOTICKS);SendMessageW(s.time,TBM_SETRANGE,TRUE,MAKELPARAM(0,1000));
     s.target=control(window,L"COMBOBOX",L"",Target,8,42,170,350,CBS_DROPDOWNLIST|WS_VSCROLL);
     s.property=control(window,L"COMBOBOX",L"",Property,188,42,170,350,CBS_DROPDOWNLIST);
-    for(const auto* name:{L"Intensity",L"Pan",L"Tilt",L"Field half-angle (deg)",L"Pattern rotation",L"Red",L"Green",L"Blue",L"Pattern",L"Strobe Hz",L"Volume strength",L"Core half-angle (deg)",L"Aperture radius (units)",L"Pattern focus",L"Iris opening",L"Pattern scale",L"Shadow softness (px)"})SendMessageW(s.property,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));
+    for(const auto* name:{L"Intensity",L"Pan",L"Tilt",L"Field half-angle (deg)",L"Pattern rotation",L"Red",L"Green",L"Blue",L"Pattern",L"Strobe Hz",L"Volume strength",L"Core half-angle (deg)",L"Aperture radius (units)",L"Pattern focus",L"Iris opening",L"Pattern scale",L"Shadow softness (px)",L"Units: 0 legacy / 1 cd / 2 lm"})SendMessageW(s.property,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));
     SendMessageW(s.property,CB_SETCURSEL,0,0);s.targets();
     s.value=control(window,TRACKBAR_CLASSW,L"",Value,370,39,230,30,TBS_NOTICKS);SendMessageW(s.value,TBM_SETRANGE,TRUE,MAKELPARAM(0,1000));SendMessageW(s.value,TBM_SETPOS,TRUE,500);
     s.valueReadout=control(window,L"STATIC",L"",0,604,46,76,22);s.updateReadout();
@@ -713,6 +758,7 @@ int main(int argc,char** argv) {
     control(window,L"BUTTON",L"Music...",LoadMusic,442,77,130,26);
     control(window,L"BUTTON",L"Clear music",ClearMusic,580,77,130,26);
 #endif
+    control(window,L"BUTTON",L"IES profile...",LoadIes,580,146,130,26);
     if(!s.hidden)ShowWindow(window,SW_SHOW);
     render::InitDesc init;init.windowHandle=window;init.width=s.width;init.height=s.height;init.vsync=false;init.msaa=0;init.backend=backend;
     if(!s.renderer.initialize(init)){DestroyWindow(window);return 4;}s.initialized=true;
@@ -812,6 +858,7 @@ int main(int argc,char** argv) {
             pointStats.instanced?"true":"false",s.player.time(),musicTime,musicLoaded?"true":"false",aggregate.occupiedCells,aggregate.selectedLights,aggregate.budgetSkipped,emitters.prepared,emitters.backFacing,emitters.clamped);
     }
     s.presenter.clearGoboTextures();
+    for(auto& [name,asset]:s.iesAssets)s.renderer.destroyTexture(asset.texture);
     for(auto& [name,texture]:s.goboTextures)s.renderer.destroyTexture(texture);
     s.renderer.shutdown();s.initialized=false;DestroyWindow(window);return s.error.empty()?0:5;
 }
