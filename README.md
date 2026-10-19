@@ -334,3 +334,11 @@ Studio --scene glass 加入两层标准透明PBR接收面；--reflections 启用
 --transparent-draws [0,1024]、--transparent-lights [0,32] 控制透明直接光额度，默认128/8。
 性能JSON提供transparentLightDraws/transparentLightBudgetSkipped/transparentUnsupportedMaterials。
 这三个选项为预览会话设置，schema7未变；不宣称玻璃折射、透射阴影或完整间接照明。
+
+
+## 2026-10-19 间接光预览
+
+Studio --indirect-lighting 启用单次屏幕漫反射，独立于 --reflections。
+--indirect-strength [0,1]、--indirect-distance [.1,100]、--indirect-rays [1,4]、
+--indirect-steps [4,32] 为有界预览控制；默认.5/10/4/24，schema7不变。
+只从屏幕内已照亮的不透明接收面采色，不包含离屏GI、玻璃折射或灯口/体积的反弹。

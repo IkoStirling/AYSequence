@@ -654,6 +654,7 @@ int main(int argc,char** argv) {
     uint32_t pointBudget=65536;
     bool stepsExplicit=false,volumeExplicit=false,pointExplicit=false,pointCpu=false,staticFog=false;
     render::PerformanceLightBudget lightBudget{64,32,4};
+    render::ScreenSpaceIndirectSettings indirect;
     bool patterns=false,areaShadows=false,reflections=false;std::string capture,preset,sceneMode="occluders",musicPath;
     render::Backend backend=render::Backend::Direct3D11;Studio s;
     for(int i=1;i<argc;++i) {
@@ -668,6 +669,11 @@ int main(int argc,char** argv) {
         else if(arg=="--transparent-draws"&&i+1<argc)transparentDrawBudget=std::stoul(argv[++i]);
         else if(arg=="--transparent-lights"&&i+1<argc)transparentObjectBudget=std::stoul(argv[++i]);
         else if(arg=="--reflections")reflections=true;
+        else if(arg=="--indirect-lighting")indirect.enabled=true;
+        else if(arg=="--indirect-strength"&&i+1<argc)indirect.strength=std::stof(argv[++i]);
+        else if(arg=="--indirect-distance"&&i+1<argc)indirect.maxDistance=std::stof(argv[++i]);
+        else if(arg=="--indirect-rays"&&i+1<argc){const auto value=std::stoul(argv[++i]);if(value<1||value>4)return 2;indirect.rays=uint8_t(value);}
+        else if(arg=="--indirect-steps"&&i+1<argc){const auto value=std::stoul(argv[++i]);if(value<4||value>32)return 2;indirect.steps=uint8_t(value);}
         else if(arg=="--surface-lights"&&i+1<argc)surfaceBudget=std::stoul(argv[++i]);
         else if(arg=="--volume-lights"&&i+1<argc){volumeBudget=std::stoul(argv[++i]);volumeExplicit=true;}
         else if(arg=="--shadow-lights"&&i+1<argc)shadowBudget=std::stoul(argv[++i]);
@@ -715,6 +721,8 @@ int main(int argc,char** argv) {
     std::vector<render::FixtureHousingDraw> housingCheck;render::FixtureHousingStats housingStats;
     if(!render::buildFixtureHousingDraws({},s.housingSettings,housingCheck,housingStats))return 2;
     s.presenter.setFixtureHousings(s.fixtureHousings,s.housingSettings);
+    const auto cleanIndirect=render::sanitizeScreenSpaceIndirect(indirect);
+    if(cleanIndirect.strength!=indirect.strength||cleanIndirect.maxDistance!=indirect.maxDistance)return 2;
     const auto cleanLens=render::sanitizeLensEffects(s.lens);
     if(cleanLens.starStrength!=s.lens.starStrength||cleanLens.ghostStrength!=s.lens.ghostStrength||cleanLens.starLength!=s.lens.starLength||cleanLens.starRotation!=s.lens.starRotation||cleanLens.dispersion!=s.lens.dispersion||cleanLens.dirtStrength!=s.lens.dirtStrength
         ||!std::isfinite(s.exposureEV)||s.exposureEV< -16||s.exposureEV>6||!std::isfinite(s.adaptBright)||s.adaptBright<.01f||s.adaptBright>20||!std::isfinite(s.adaptDark)||s.adaptDark<.01f||s.adaptDark>20)return 2;
@@ -849,6 +857,7 @@ int main(int argc,char** argv) {
     s.fog.noiseStrength=staticFog?0.f:.35f;s.fog.noiseScale=.2f;s.renderer.setVolumetricSettings(s.fog);
     const auto cube=s.renderer.createTexturedUnitCube();const auto material=s.renderer.createMaterialFromPhoskia(render::kPbrPhoskiaSource,"light_show_stage_pbr");
     s.renderer.setMaterialColor(material,"baseColor",.3f,.32f,.36f,1);s.renderer.setMaterialFloat(material,"roughness",.65f);
+    s.renderer.setScreenSpaceIndirectSettings(indirect);
     if(reflections){render::SsrSettings ssr;ssr.enabled=true;s.renderer.setSsrSettings(ssr);s.renderer.setMaterialFloat(material,"metallic",.95f);s.renderer.setMaterialFloat(material,"roughness",.08f);}
     render::MeshHandle glassPlane;render::MaterialHandle glassMaterial;
     if(sceneMode=="glass"){
