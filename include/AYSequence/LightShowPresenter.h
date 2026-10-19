@@ -3,6 +3,7 @@
 #include <AYRenderer/EmissivePointCloud.h>
 #include <AYRenderer/PerformanceLighting.h>
 #include <AYRenderer/FixtureEmitters.h>
+#include <AYRenderer/FixtureHousings.h>
 #include <unordered_map>
 namespace ayt::sequence {
 /// Optional AYSequence::RendererIntegration. Feed one evaluated show frame on
@@ -36,6 +37,12 @@ public:
         _fixtureEmittersEnabled=enabled;_fixtureEmitterSettings=settings;
     }
     render::FixtureEmitterStats fixtureEmitterStats() const noexcept { return _fixtureEmittersEnabled?_emitters.stats():render::FixtureEmitterStats{}; }
+    /// Optional opaque body/hood/shade-leaf geometry, independent of whether
+    /// the lamp is lit. Default off; only finite-aperture Spot fixtures qualify.
+    void setFixtureHousings(bool enabled,render::FixtureHousingSettings settings={}) noexcept {
+        _fixtureHousingsEnabled=enabled;_fixtureHousingSettings=settings;
+    }
+    render::FixtureHousingStats fixtureHousingStats() const noexcept {return _fixtureHousingsEnabled?_housings.stats():render::FixtureHousingStats{};}
     render::EmissivePointStats pointStats() const noexcept { return _points.stats(); }
 private:
     std::unordered_map<std::uint32_t,render::TextureHandle> _goboTextures;
@@ -44,6 +51,9 @@ private:
     bool _constantFlux=false,_fixtureEmittersEnabled=false;
     render::FixtureEmitterSettings _fixtureEmitterSettings;
     render::FixtureEmitters _emitters;
+    bool _fixtureHousingsEnabled=false;
+    render::FixtureHousingSettings _fixtureHousingSettings;
+    render::FixtureHousings _housings;
     render::EmissivePointCloud _points;
     render::EmissivePointLightingSettings _pointLighting{0};
     render::EmissivePointLightingStats _pointLightingStats;

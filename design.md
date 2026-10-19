@@ -284,3 +284,19 @@ CLI支持--lens-effects、--lens-star/--lens-ghost [0,4]、--lens-length [.001,.
 --lens-axes 1..4（1轴为横向光芒）、--lens-rotation弧度、--lens-dispersion [0,.02]、
 --lens-dirt [0,1]、--auto-exposure、--exposure-ev、--adapt-bright/--adapt-dark；越界退出2。
 Lens默认关闭、曝光默认锁定0EV，兼容旧预览。参数是会话相机设置，不烘焙到灯具关键帧。
+
+
+## 2026-10-19 灯体与遮光几何
+
+FixtureHousings::append显式追加不透明灯壳、镜片边框、筒形遮光罩与可选四片铰接遮光叶。
+bodyLength[.5,10]、hoodLength[0,4]为出光口半径倍数，leafAngle[-.5,.5]rad为铰接角。
+单位网格/材质在Renderer中共享，变更设置只改矩阵；不销毁保留场景仍引用的旧网格。
+最多256灯/1536部件，灯灭保留实体，Point/零出光口跳过；非法输入保留准备输出/统计。
+普通opaque深度、GBuffer与刚体批处理生效，背壳/罩/叶片可遮挡相机所见灯口。
+灯壳金属为共享PBR材质，接受既有灯光/阴影；半径与方向跟随演出帧，外壳不随iris收缩。
+这些是可见几何，不会重写光度/IES/Gobo或把叶片角自动转换为光束通光率；
+光传播遮挡仍服从现有阴影预算/近裁剪精度，近灯口的机械挡光并非完整镜片追迹。
+
+Presenter.setFixtureHousings默认关闭；Studio默认开启，可切换Housings/ Shade leaves。
+--no-housings、--shade-leaves、--body-length、--hood-length、--leaf-angle控制会话预览，
+非法维度退出2；不改.lshow schema6。动画/关键帧仍拥有灯具姿态与出光口尺寸。

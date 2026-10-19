@@ -32,7 +32,7 @@
 using namespace ayt;
 namespace {
 constexpr int toolbarHeight=288;
-enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle,ToggleFogMotion,KeyLane,KeyDestination,KeyInterpolation,MoveKey,CopyKey,RemoveKey,ApplyInterpolation,PreviousKey,NextKey,TogglePointLights,ToggleFlux,ToggleEmitters,SourceFront,SourceSide,SourceBack,LoadIes,ToggleLens,ToggleExposure,ApplyCamera };
+enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle,ToggleFogMotion,KeyLane,KeyDestination,KeyInterpolation,MoveKey,CopyKey,RemoveKey,ApplyInterpolation,PreviousKey,NextKey,TogglePointLights,ToggleFlux,ToggleEmitters,SourceFront,SourceSide,SourceBack,LoadIes,ToggleLens,ToggleExposure,ApplyCamera,ToggleHousings,ToggleLeaves };
 struct ShowRevision { std::shared_ptr<const sequence::CompiledLightShow> show; std::string path; };
 #if defined(AY_LIGHTSHOW_AUDIO)
 // Studio-only bridge: the decoded clip's playback head is the show clock.
@@ -150,6 +150,8 @@ struct Studio {
     bool constantFlux=false,fixtureEmitters=true;
     render::FixtureEmitterSettings emitterSettings;
     render::LensEffectsSettings lens;
+    bool fixtureHousings=true;
+    render::FixtureHousingSettings housingSettings;
     bool autoExposure=false;
     float exposureEV=0,adaptBright=2,adaptDark=1;
     HWND exposureEdit=nullptr,brightEdit=nullptr,darkEdit=nullptr;
@@ -517,6 +519,8 @@ struct Studio {
         if(id==ToggleLens){lens.enabled=!lens.enabled;renderer.setLensEffects(lens);SetDlgItemTextW(window,ToggleLens,lens.enabled?L"Lens effects on":L"Lens effects off");}
         if(id==ToggleExposure){autoExposure=!autoExposure;renderer.setAutoExposureEnabled(autoExposure);SetDlgItemTextW(window,ToggleExposure,autoExposure?L"Auto exposure":L"Exposure locked");}
         if(id==ApplyCamera)applyCamera();
+        if(id==ToggleHousings){fixtureHousings=!fixtureHousings;presenter.setFixtureHousings(fixtureHousings,housingSettings);SetDlgItemTextW(window,ToggleHousings,fixtureHousings?L"Housings on":L"Housings off");}
+        if(id==ToggleLeaves){housingSettings.shadeLeaves=!housingSettings.shadeLeaves;presenter.setFixtureHousings(fixtureHousings,housingSettings);SetDlgItemTextW(window,ToggleLeaves,housingSettings.shadeLeaves?L"Shade leaves on":L"Shade leaves off");}
 #if defined(AY_LIGHTSHOW_AUDIO)
         if(id==LoadMusic)loadMusic();
         if(id==ClearMusic)music.clear();
@@ -665,6 +669,11 @@ int main(int argc,char** argv) {
         else if(arg=="--emitter-glow"&&i+1<argc)s.emitterSettings.offAxisGlow=std::stof(argv[++i]);
         else if(arg=="--constant-flux")s.constantFlux=true;
         else if(arg=="--lens-effects")s.lens.enabled=true;
+        else if(arg=="--no-housings")s.fixtureHousings=false;
+        else if(arg=="--shade-leaves")s.housingSettings.shadeLeaves=true;
+        else if(arg=="--leaf-angle"&&i+1<argc)s.housingSettings.leafAngle=std::stof(argv[++i]);
+        else if(arg=="--hood-length"&&i+1<argc)s.housingSettings.hoodLength=std::stof(argv[++i]);
+        else if(arg=="--body-length"&&i+1<argc)s.housingSettings.bodyLength=std::stof(argv[++i]);
         else if(arg=="--lens-star"&&i+1<argc)s.lens.starStrength=std::stof(argv[++i]);
         else if(arg=="--lens-ghost"&&i+1<argc)s.lens.ghostStrength=std::stof(argv[++i]);
         else if(arg=="--lens-length"&&i+1<argc)s.lens.starLength=std::stof(argv[++i]);
@@ -690,6 +699,9 @@ int main(int argc,char** argv) {
         else if(arg=="--backend"&&i+1<argc)backend=std::string(argv[++i])=="d3d12"?render::Backend::Direct3D12:render::Backend::Direct3D11;
         else s.path=arg;
     }
+    std::vector<render::FixtureHousingDraw> housingCheck;render::FixtureHousingStats housingStats;
+    if(!render::buildFixtureHousingDraws({},s.housingSettings,housingCheck,housingStats))return 2;
+    s.presenter.setFixtureHousings(s.fixtureHousings,s.housingSettings);
     const auto cleanLens=render::sanitizeLensEffects(s.lens);
     if(cleanLens.starStrength!=s.lens.starStrength||cleanLens.ghostStrength!=s.lens.ghostStrength||cleanLens.starLength!=s.lens.starLength||cleanLens.starRotation!=s.lens.starRotation||cleanLens.dispersion!=s.lens.dispersion||cleanLens.dirtStrength!=s.lens.dirtStrength
         ||!std::isfinite(s.exposureEV)||s.exposureEV< -16||s.exposureEV>6||!std::isfinite(s.adaptBright)||s.adaptBright<.01f||s.adaptBright>20||!std::isfinite(s.adaptDark)||s.adaptDark<.01f||s.adaptDark>20)return 2;
@@ -800,6 +812,8 @@ int main(int argc,char** argv) {
     control(window,L"BUTTON",L"Clear music",ClearMusic,580,77,130,26);
 #endif
     control(window,L"BUTTON",L"IES profile...",LoadIes,580,146,130,26);
+    control(window,L"BUTTON",s.fixtureHousings?L"Housings on":L"Housings off",ToggleHousings,718,146,150,26);
+    control(window,L"BUTTON",s.housingSettings.shadeLeaves?L"Shade leaves on":L"Shade leaves off",ToggleLeaves,876,146,150,26);
     control(window,L"BUTTON",s.lens.enabled?L"Lens effects on":L"Lens effects off",ToggleLens,8,180,160,26);
     control(window,L"BUTTON",s.autoExposure?L"Auto exposure":L"Exposure locked",ToggleExposure,176,180,160,26);
     control(window,L"STATIC",L"Exposure EV",0,344,185,90,22);
