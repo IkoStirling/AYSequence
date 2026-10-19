@@ -280,3 +280,13 @@ CPU裁剪取所有分束包围盒并集，体积解析各束交段的保守并�
 .lshow写schema6；schema1..5补focusDistance0/prismCount1/prismAngle0/prismRotation0。
 焦距/倾角/连续旋转可插值，束数在关键帧处切换。所有键的outerAngle+prismAngle<=1.56，
 保证跨拓扑键的中间帧仍合法。Studio属性可编排；--preset optics演示四束旋转与15单位焦面。
+
+
+## 2026-10-19 Studio相机控制
+
+工具栏加入Lens effects开关、Exposure locked/Auto exposure切换、手动曝光补偿EV[-16,6]，
+以及brighten/darken适应速度[.01,20]。Apply camera先验证全部输入再应用，不写.lshow schema6。
+CLI支持--lens-effects、--lens-star/--lens-ghost [0,4]、--lens-length [.001,.25]、
+--lens-axes 1..4（1轴为横向光芒）、--lens-rotation弧度、--lens-dispersion [0,.02]、
+--lens-dirt [0,1]、--auto-exposure、--exposure-ev、--adapt-bright/--adapt-dark；越界退出2。
+Lens默认关闭、曝光默认锁定0EV，兼容旧预览。参数是会话相机设置，不烘焙到灯具关键帧。

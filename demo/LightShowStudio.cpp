@@ -31,8 +31,8 @@
 
 using namespace ayt;
 namespace {
-constexpr int toolbarHeight=252;
-enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle,ToggleFogMotion,KeyLane,KeyDestination,KeyInterpolation,MoveKey,CopyKey,RemoveKey,ApplyInterpolation,PreviousKey,NextKey,TogglePointLights,ToggleFlux,ToggleEmitters,SourceFront,SourceSide,SourceBack,LoadIes };
+constexpr int toolbarHeight=288;
+enum Command { Play=100,Restart,Open,Save,Undo,Redo,AddKey,Circle,Sphere,Palette,Target,Property,Value,Time,ViewBoth,ViewStage,ViewSky,CheckRoutes,LoadGobo,SmokeBox,ToggleShadow,LoadMusic,ClearMusic,PlanRoute,ExportBundle,ToggleFogMotion,KeyLane,KeyDestination,KeyInterpolation,MoveKey,CopyKey,RemoveKey,ApplyInterpolation,PreviousKey,NextKey,TogglePointLights,ToggleFlux,ToggleEmitters,SourceFront,SourceSide,SourceBack,LoadIes,ToggleLens,ToggleExposure,ApplyCamera };
 struct ShowRevision { std::shared_ptr<const sequence::CompiledLightShow> show; std::string path; };
 #if defined(AY_LIGHTSHOW_AUDIO)
 // Studio-only bridge: the decoded clip's playback head is the show clock.
@@ -149,6 +149,10 @@ struct Studio {
     render::EmissivePointLightingSettings pointLighting{0};
     bool constantFlux=false,fixtureEmitters=true;
     render::FixtureEmitterSettings emitterSettings;
+    render::LensEffectsSettings lens;
+    bool autoExposure=false;
+    float exposureEV=0,adaptBright=2,adaptDark=1;
+    HWND exposureEdit=nullptr,brightEdit=nullptr,darkEdit=nullptr;
     float minimumSeparation=.5f;
     std::vector<uint32_t> selectedFixtureIds() const {
         std::vector<uint32_t> result;
@@ -421,6 +425,15 @@ struct Studio {
         edit(std::move(data));
         if(!error.empty())MessageBoxA(window,error.c_str(),"Gobo image",MB_OK|MB_ICONWARNING);
     }
+    void applyCamera(){
+        const auto read=[](HWND edit,float& output,float low,float high){wchar_t text[64]{};GetWindowTextW(edit,text,64);wchar_t* end=nullptr;const auto value=std::wcstod(text,&end);if(end==text||*end||!std::isfinite(value)||value<low||value>high)return false;output=float(value);return true;};
+        float ev=0,bright=0,dark=0;
+        if(!read(exposureEdit,ev,-16,6)||!read(brightEdit,bright,.01f,20)||!read(darkEdit,dark,.01f,20)){
+            MessageBoxW(window,L"Exposure must be -16..6 EV; adaptation speeds must be .01..20.",L"Camera",MB_OK|MB_ICONWARNING);return;
+        }
+        exposureEV=ev;adaptBright=bright;adaptDark=dark;
+        renderer.setPostProcessExposure(std::exp2(exposureEV));renderer.setAutoExposureAdaptation(adaptBright,adaptDark);
+    }
     void loadIes() {
         if(path.empty()){MessageBoxW(window,L"Save the .lshow file first.",L"IES profile",MB_OK|MB_ICONINFORMATION);return;}
         wchar_t filename[32768]{};
@@ -501,6 +514,9 @@ struct Studio {
         if(id==Open)file(false);if(id==Save)file(true);if(id==ExportBundle)exportBundle();if(id==AddKey)key();
         if(id==LoadGobo)loadGobo();
         if(id==LoadIes)loadIes();
+        if(id==ToggleLens){lens.enabled=!lens.enabled;renderer.setLensEffects(lens);SetDlgItemTextW(window,ToggleLens,lens.enabled?L"Lens effects on":L"Lens effects off");}
+        if(id==ToggleExposure){autoExposure=!autoExposure;renderer.setAutoExposureEnabled(autoExposure);SetDlgItemTextW(window,ToggleExposure,autoExposure?L"Auto exposure":L"Exposure locked");}
+        if(id==ApplyCamera)applyCamera();
 #if defined(AY_LIGHTSHOW_AUDIO)
         if(id==LoadMusic)loadMusic();
         if(id==ClearMusic)music.clear();
@@ -612,7 +628,7 @@ LRESULT CALLBACK procedure(HWND window,UINT message,WPARAM w,LPARAM l) {
     if(!s)return DefWindowProcW(window,message,w,l);
     if(message==WM_CLOSE){s->running=false;return 0;}
     if(message==WM_COMMAND){s->command(LOWORD(w));return 0;}
-    if(message==WM_SIZE){s->width=static_cast<uint16_t>(std::max(1,int(LOWORD(l))));s->height=static_cast<uint16_t>(std::max(toolbarHeight+1,int(HIWORD(l))));if(s->timeline)MoveWindow(s->timeline,8,180,std::max(1,int(s->width)-16),64,TRUE);if(s->initialized)s->renderer.resize(s->width,s->height);return 0;}
+    if(message==WM_SIZE){s->width=static_cast<uint16_t>(std::max(1,int(LOWORD(l))));s->height=static_cast<uint16_t>(std::max(toolbarHeight+1,int(HIWORD(l))));if(s->timeline)MoveWindow(s->timeline,8,216,std::max(1,int(s->width)-16),64,TRUE);if(s->initialized)s->renderer.resize(s->width,s->height);return 0;}
     if(message==WM_HSCROLL&&reinterpret_cast<HWND>(l)==s->time){s->seekPreview(double(SendMessageW(s->time,TBM_GETPOS,0,0))/1000*s->show->data().duration);return 0;}
     if(message==WM_HSCROLL&&reinterpret_cast<HWND>(l)==s->value){s->updateReadout();return 0;}
     return DefWindowProcW(window,message,w,l);
@@ -648,6 +664,18 @@ int main(int argc,char** argv) {
         else if(arg=="--emitter-scale"&&i+1<argc)s.emitterSettings.radianceScale=std::stof(argv[++i]);
         else if(arg=="--emitter-glow"&&i+1<argc)s.emitterSettings.offAxisGlow=std::stof(argv[++i]);
         else if(arg=="--constant-flux")s.constantFlux=true;
+        else if(arg=="--lens-effects")s.lens.enabled=true;
+        else if(arg=="--lens-star"&&i+1<argc)s.lens.starStrength=std::stof(argv[++i]);
+        else if(arg=="--lens-ghost"&&i+1<argc)s.lens.ghostStrength=std::stof(argv[++i]);
+        else if(arg=="--lens-length"&&i+1<argc)s.lens.starLength=std::stof(argv[++i]);
+        else if(arg=="--lens-rotation"&&i+1<argc)s.lens.starRotation=std::stof(argv[++i]);
+        else if(arg=="--lens-axes"&&i+1<argc){const auto axes=std::stoul(argv[++i]);if(axes<1||axes>4)return 2;s.lens.starAxes=uint8_t(axes);}
+        else if(arg=="--lens-dispersion"&&i+1<argc)s.lens.dispersion=std::stof(argv[++i]);
+        else if(arg=="--lens-dirt"&&i+1<argc)s.lens.dirtStrength=std::stof(argv[++i]);
+        else if(arg=="--auto-exposure")s.autoExposure=true;
+        else if(arg=="--exposure-ev"&&i+1<argc)s.exposureEV=std::stof(argv[++i]);
+        else if(arg=="--adapt-bright"&&i+1<argc)s.adaptBright=std::stof(argv[++i]);
+        else if(arg=="--adapt-dark"&&i+1<argc)s.adaptDark=std::stof(argv[++i]);
         else if(arg=="--point-cpu")pointCpu=true;
         else if(arg=="--static-fog")staticFog=true;
         else if(arg=="--smoke-box"&&i+6<argc){s.fog.local=true;s.fog.center={std::stof(argv[++i]),std::stof(argv[++i]),std::stof(argv[++i])};s.fog.halfExtent={std::stof(argv[++i]),std::stof(argv[++i]),std::stof(argv[++i])};}
@@ -662,6 +690,9 @@ int main(int argc,char** argv) {
         else if(arg=="--backend"&&i+1<argc)backend=std::string(argv[++i])=="d3d12"?render::Backend::Direct3D12:render::Backend::Direct3D11;
         else s.path=arg;
     }
+    const auto cleanLens=render::sanitizeLensEffects(s.lens);
+    if(cleanLens.starStrength!=s.lens.starStrength||cleanLens.ghostStrength!=s.lens.ghostStrength||cleanLens.starLength!=s.lens.starLength||cleanLens.starRotation!=s.lens.starRotation||cleanLens.dispersion!=s.lens.dispersion||cleanLens.dirtStrength!=s.lens.dirtStrength
+        ||!std::isfinite(s.exposureEV)||s.exposureEV< -16||s.exposureEV>6||!std::isfinite(s.adaptBright)||s.adaptBright<.01f||s.adaptBright>20||!std::isfinite(s.adaptDark)||s.adaptDark<.01f||s.adaptDark>20)return 2;
     s.presenter.setPointLighting(s.pointLighting);s.presenter.setConstantFlux(s.constantFlux);s.presenter.setFixtureEmitters(s.fixtureEmitters,s.emitterSettings);
     sequence::LightShow data=sequence::makeLightShowExample(fixtures,points);
     if(preset=="optics"){
@@ -762,19 +793,29 @@ int main(int argc,char** argv) {
     control(window,L"BUTTON",L"Source front",SourceFront,166,146,130,26);
     control(window,L"BUTTON",L"Source side",SourceSide,304,146,130,26);
     control(window,L"BUTTON",L"Source back",SourceBack,442,146,130,26);
-    s.timeline=CreateWindowExW(0,timelineClass.lpszClassName,L"",WS_CHILD|WS_VISIBLE,8,180,
+    s.timeline=CreateWindowExW(0,timelineClass.lpszClassName,L"",WS_CHILD|WS_VISIBLE,8,216,
         int(s.width)-16,64,window,nullptr,wc.hInstance,&s);
 #if defined(AY_LIGHTSHOW_AUDIO)
     control(window,L"BUTTON",L"Music...",LoadMusic,442,77,130,26);
     control(window,L"BUTTON",L"Clear music",ClearMusic,580,77,130,26);
 #endif
     control(window,L"BUTTON",L"IES profile...",LoadIes,580,146,130,26);
+    control(window,L"BUTTON",s.lens.enabled?L"Lens effects on":L"Lens effects off",ToggleLens,8,180,160,26);
+    control(window,L"BUTTON",s.autoExposure?L"Auto exposure":L"Exposure locked",ToggleExposure,176,180,160,26);
+    control(window,L"STATIC",L"Exposure EV",0,344,185,90,22);
+    s.exposureEdit=control(window,L"EDIT",std::to_wstring(s.exposureEV).c_str(),0,438,180,80,26,WS_BORDER|ES_AUTOHSCROLL);
+    control(window,L"STATIC",L"Brighten",0,526,185,64,22);
+    s.brightEdit=control(window,L"EDIT",std::to_wstring(s.adaptBright).c_str(),0,594,180,64,26,WS_BORDER|ES_AUTOHSCROLL);
+    control(window,L"STATIC",L"Darken",0,666,185,64,22);
+    s.darkEdit=control(window,L"EDIT",std::to_wstring(s.adaptDark).c_str(),0,734,180,64,26,WS_BORDER|ES_AUTOHSCROLL);
+    control(window,L"BUTTON",L"Apply camera",ApplyCamera,806,180,130,26);
     if(!s.hidden)ShowWindow(window,SW_SHOW);
     render::InitDesc init;init.windowHandle=window;init.width=s.width;init.height=s.height;init.vsync=false;init.msaa=0;init.backend=backend;
     if(!s.renderer.initialize(init)){DestroyWindow(window);return 4;}s.initialized=true;
     if(!s.prepareGobos(*s.show,s.path)){std::fprintf(stderr,"%s\n",s.error.c_str());s.renderer.shutdown();DestroyWindow(window);return 4;}
     s.renderer.configurePipeline(render::RenderPipelineDesc::makeDeferred());s.renderer.setAmbientStrength(.08f);
-    s.renderer.setPostProcessBloomStrength(.2f);s.renderer.setPostProcessBloomThreshold(1);s.renderer.setPostProcessExposure(1);
+    s.renderer.setPostProcessBloomStrength(.2f);s.renderer.setPostProcessBloomThreshold(1);s.renderer.setPostProcessExposure(std::exp2(s.exposureEV));
+    s.renderer.setLensEffects(s.lens);s.renderer.setAutoExposureEnabled(s.autoExposure);s.renderer.setAutoExposureAdaptation(s.adaptBright,s.adaptDark);
     s.fog.enabled=true;s.fog.density=.015f;s.fog.steps=static_cast<uint8_t>(steps);s.fog.maxDistance=100;s.fog.anisotropy=.2f;
     s.fog.noiseStrength=staticFog?0.f:.35f;s.fog.noiseScale=.2f;s.renderer.setVolumetricSettings(s.fog);
     const auto cube=s.renderer.createTexturedUnitCube();const auto material=s.renderer.createMaterialFromPhoskia(render::kPbrPhoskiaSource,"light_show_stage_pbr");
