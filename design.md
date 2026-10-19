@@ -15,7 +15,7 @@ Smooth反解进度为节目时间，Step只检查保持位置和下一键，不�
 每轮仍用同一连续间距诊断验证两段路径，最多尝试八档高度间隔。端点重叠、
 诊断预算不足或最大高度内无法消除交叉时不替换输出。该功能只规划视觉过渡，
 不计算障碍物、速度/加速度约束，也不认证真实飞行。
-严格schema5/.lshow只作loose作者资源，兼容读取schema1/2/3并显式补零出光口、
+严格schema6/.lshow只作loose作者资源，兼容读取schema1/2/3并显式补零出光口、
 清晰焦点/全开光阑或空贴图路径，不重解释旧文件的角度/功率；旧版本夹带新字段拒绝。
 Texture Gobo路径属灯具轨道，不随时间插值，必须相对演出文件且不得越出其目录。
 Presenter按稳定灯具ID绑定Renderer纹理，缺少贴图的Texture键在提交前失败。
@@ -254,3 +254,23 @@ createIesTexture上传257×129线性RGBA8角度图，CPU灯口与GPU表面/体�
 .lshow写schema5，旧schema1..4补Legacy与空iesProfilePath，旧版本夹带新字段拒绝。
 FixtureTrack.iesProfilePath是相对路径；Presenter用bindIesProfile绑定，缺少必需绑定在替换灯包前失败。
 Studio提供IES文件选择、灯具单位属性与缓存；Save As检查新目录的依赖，资源包复制引用IES。
+
+
+## 2026-10-19 距离焦平面与棱镜
+
+focusDistance>0使用有限出光口/iris作为几何瞳孔，距焦面z处的弥散圆半径为
+apertureRadius×iris×abs(1-z/focusDistance)，除以该处光束半径得到投影滤波足迹。
+焦面处额外模糊为零，零focusDistance精确保留旧柔焦；图案使用有界五点瞳孔滤波，
+不是衍射/像差/连续光学卷积。patternFocus仍是独立的作者柔化参数。
+
+prismCount为1（禁用）或2..8，prismAngle[0,.35]rad，prismRotation为连续弧度。
+每束保持原核心/外场发散，绕主轴倾斜并按束数分配强度；表面/烟雾/可见灯口共享方向与IES。
+有限瞳孔的分束在出光口附近允许真实几何重叠；不人为挖空中心。
+CPU裁剪取所有分束包围盒并集，体积解析各束交段的保守并集，再对实际每束求值。
+阴影仍同一出光位置，投影外场扩大覆盖分束；非面积光阴影。
+同灯仍一个表面和一个体积draw，shader最多8束，体积保留最多64步；稀疏宽分束可能欠采样，
+不保证与单束相同GPU成本。五条固定Star图案射线展开，保留Shader1024迭代乘积安全门。
+
+.lshow写schema6；schema1..5补focusDistance0/prismCount1/prismAngle0/prismRotation0。
+焦距/倾角/连续旋转可插值，束数在关键帧处切换。所有键的outerAngle+prismAngle<=1.56，
+保证跨拓扑键的中间帧仍合法。Studio属性可编排；--preset optics演示四束旋转与15单位焦面。

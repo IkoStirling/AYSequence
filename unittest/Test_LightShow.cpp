@@ -234,14 +234,18 @@ TEST_CASE(roundtrip_preserves_lights_formations_patterns_and_absolute_time) {
 }
 TEST_CASE(schema1_through_3_migrate_optics_and_texture_path) {
     std::string bytes,error;CHECK(encodeLightShow(showFixture(),bytes));LightShow output;
-    CHECK(bytes.find("\"version\": 5")!=std::string::npos);
+    CHECK(bytes.find("\"version\": 6")!=std::string::npos);
     const auto removeField=[](std::string& document,const char* field){
         size_t at=0;
         while((at=document.find(field,at))!=std::string::npos){
             const auto end=document.find(',',at);document.erase(at,end+1-at);
         }
     };
-    auto legacy=bytes;legacy.replace(legacy.find("\"version\": 5"),12,"\"version\": 4");
+    auto legacy=bytes;legacy.replace(legacy.find("\"version\": 6"),12,"\"version\": 5");
+    CHECK(!decodeLightShow(legacy,output,&error));
+    removeField(legacy,"\"focusDistance\"");removeField(legacy,"\"prismCount\"");removeField(legacy,"\"prismAngle\"");removeField(legacy,"\"prismRotation\"");
+    CHECK(decodeLightShow(legacy,output,&error));CHECK(output.fixtures[0].keys[0].value.focusDistance==0);CHECK(output.fixtures[0].keys[0].value.prismCount==1);
+    legacy.replace(legacy.find("\"version\": 5"),12,"\"version\": 4");
     CHECK(!decodeLightShow(legacy,output,&error));
     removeField(legacy,"\"intensityUnit\"");removeField(legacy,"\"iesProfilePath\"");
     CHECK(decodeLightShow(legacy,output,&error));
@@ -263,7 +267,7 @@ TEST_CASE(schema1_through_3_migrate_optics_and_texture_path) {
     CHECK(!decodeLightShow(legacy,output,&error)); // v2 aperture is not legal in v1.
     removeField(legacy,"\"apertureRadius\"");CHECK(decodeLightShow(legacy,output,&error));
     for(const auto& key:output.fixtures[0].keys)CHECK(key.value.apertureRadius==0);
-    CHECK(encodeLightShow(output,legacy));CHECK(legacy.find("\"version\": 5")!=std::string::npos);
+    CHECK(encodeLightShow(output,legacy));CHECK(legacy.find("\"version\": 6")!=std::string::npos);
     removeField(bytes,"\"apertureRadius\"");CHECK(!decodeLightShow(bytes,output,&error));
     CHECK(output.fixtures[0].keys[0].value.apertureRadius==0); // failed decode preserves output.
 }
@@ -345,5 +349,20 @@ TEST_CASE(bundle_includes_ies_and_rejects_missing_profile) {
     CHECK(!exportLightShowBundle(source.string(),bundle.string(),{}));CHECK(!std::filesystem::exists(bundle));
     {std::ofstream file(root/"spot.ies");file<<"profile";}
     CHECK(exportLightShowBundle(source.string(),bundle.string(),{}));CHECK(std::filesystem::exists(bundle/"spot.ies"));
+}
+TEST_SUITE_END
+
+TEST_SUITE(LightShowOpticsTests)
+TEST_CASE(focus_and_prism_continuous_parameters_interpolate_topology_steps) {
+    auto data=showFixture();auto& track=data.fixtures[0];auto a=track.keys.front().value,b=a;
+    a.focusDistance=5;a.prismCount=2;a.prismAngle=.1f;a.prismRotation=0;
+    b.focusDistance=15;b.prismCount=4;b.prismAngle=.3f;b.prismRotation=6.283185307f;
+    track.keys={{0,a},{4,b}};auto compiled=CompiledLightShow::compile(data);CHECK(compiled!=nullptr);if(!compiled)return;
+    LightShowFrame frame;CHECK(compiled->evaluate(2,frame));const auto& mid=frame.fixtures[0].value;
+    CHECK(mid.focusDistance==10);CHECK(mid.prismCount==2);CHECK(std::abs(mid.prismAngle-.2f)<1e-6);CHECK(std::abs(mid.prismRotation-3.141592654f)<1e-6);
+    CHECK(compiled->evaluate(4,frame));CHECK(frame.fixtures[0].value.prismCount==4);
+    std::string bytes;CHECK(encodeLightShow(data,bytes));LightShow copy;CHECK(decodeLightShow(bytes,copy));CHECK(copy.fixtures[0].keys.back().value.prismCount==4);
+    track.keys.front().value.prismCount=9;CHECK(!CompiledLightShow::compile(data));
+    track.keys.front().value.prismCount=2;track.keys.front().value.focusDistance=-1;CHECK(!CompiledLightShow::compile(data));
 }
 TEST_SUITE_END

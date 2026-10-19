@@ -3,7 +3,7 @@
 ## 灯光与发光点演出（2026-10-16）
 
 LightShow.h提供独立的owned快照、灯具键/扫动/频闪、稳定ID点阵编队和绝对时间播放器。
-LightShowAssetIO.h写严格schema5的.lshow JSON，读取schema1时出光口半径置零，
+LightShowAssetIO.h写严格schema6的.lshow JSON，读取schema1时出光口半径置零，
 读取schema1/2时图案焦点清晰且光阑全开，读取schema1/2/3时Gobo贴图路径为空，AYIO原子保存。
 灯具支持有限出光口半径、聚光核心半角和外层发散半角；默认窄角、无图案。
 图案柔焦/光阑可关键帧插值。Texture Gobo使用灯具级相对贴图路径，
@@ -260,3 +260,23 @@ createIesTexture上传257×129线性RGBA8角度图，CPU灯口与GPU表面/体�
 .lshow写schema5，旧schema1..4补Legacy与空iesProfilePath，旧版本夹带新字段拒绝。
 FixtureTrack.iesProfilePath是相对路径；Presenter用bindIesProfile绑定，缺少必需绑定在替换灯包前失败。
 Studio提供IES文件选择、灯具单位属性与缓存；Save As检查新目录的依赖，资源包复制引用IES。
+
+
+## 2026-10-19 距离焦平面与棱镜
+
+focusDistance>0使用有限出光口/iris作为几何瞳孔，距焦面z处的弥散圆半径为
+apertureRadius×iris×abs(1-z/focusDistance)，除以该处光束半径得到投影滤波足迹。
+焦面处额外模糊为零，零focusDistance精确保留旧柔焦；图案使用有界五点瞳孔滤波，
+不是衍射/像差/连续光学卷积。patternFocus仍是独立的作者柔化参数。
+
+prismCount为1（禁用）或2..8，prismAngle[0,.35]rad，prismRotation为连续弧度。
+每束保持原核心/外场发散，绕主轴倾斜并按束数分配强度；表面/烟雾/可见灯口共享方向与IES。
+有限瞳孔的分束在出光口附近允许真实几何重叠；不人为挖空中心。
+CPU裁剪取所有分束包围盒并集，体积解析各束交段的保守并集，再对实际每束求值。
+阴影仍同一出光位置，投影外场扩大覆盖分束；非面积光阴影。
+同灯仍一个表面和一个体积draw，shader最多8束，体积保留最多64步；稀疏宽分束可能欠采样，
+不保证与单束相同GPU成本。五条固定Star图案射线展开，保留Shader1024迭代乘积安全门。
+
+.lshow写schema6；schema1..5补focusDistance0/prismCount1/prismAngle0/prismRotation0。
+焦距/倾角/连续旋转可插值，束数在关键帧处切换。所有键的outerAngle+prismAngle<=1.56，
+保证跨拓扑键的中间帧仍合法。Studio属性可编排；--preset optics演示四束旋转与15单位焦面。

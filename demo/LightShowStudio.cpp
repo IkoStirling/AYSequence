@@ -217,6 +217,8 @@ struct Studio {
             case 15:number=.25+3.75*v;break;
             case 16:number=4*v;suffix=L" px";break;
             case 17:number=std::min(2,int(v*3));break;
+            case 18:number=100*v;suffix=L" units";break;case 19:number=1+std::min(7,int(v*8));break;
+            case 20:number=.35*v*180/std::numbers::pi;suffix=L" deg";break;case 21:number=360*v;suffix=L" deg";break;
         }
         wchar_t text[64];swprintf_s(text,L"%.3g%ls",number,suffix);SetWindowTextW(valueReadout,text);
     }
@@ -311,6 +313,8 @@ struct Studio {
                 case 15:state.goboScale=.25f+3.75f*v;break;
                 case 16:state.shadowSoftness=4*v;break;
                 case 17:state.intensityUnit=static_cast<sequence::ShowIntensityUnit>(std::min(2,int(v*3)));break;
+                case 18:state.focusDistance=100*v;break;case 19:state.prismCount=uint8_t(1+std::min(7,int(v*8)));break;
+                case 20:state.prismAngle=.35f*v;break;case 21:state.prismRotation=float(2*std::numbers::pi)*v;break;
             }
             const double time=player.time();
             auto found=std::lower_bound(track.keys.begin(),track.keys.end(),time,[](const auto& k,double t){return k.time<t;});
@@ -660,6 +664,12 @@ int main(int argc,char** argv) {
     }
     s.presenter.setPointLighting(s.pointLighting);s.presenter.setConstantFlux(s.constantFlux);s.presenter.setFixtureEmitters(s.fixtureEmitters,s.emitterSettings);
     sequence::LightShow data=sequence::makeLightShowExample(fixtures,points);
+    if(preset=="optics"){
+        data=sequence::makeLightShowExample(1,0);auto& track=data.fixtures.front();track.sweepPan=track.sweepTilt=track.sweepFrequency=track.strobeFrequency=0;
+        auto value=track.keys.front().value;value.position={0,15,0};value.pan=value.tilt=0;value.intensity=100;value.apertureRadius=.15f;value.innerAngle=.025f;value.outerAngle=.05f;
+        value.gobo=sequence::ShowGobo::Grid;value.focusDistance=15;value.prismCount=4;value.prismAngle=.12f;
+        track.keys={{0,value}};value.prismRotation=float(2*std::numbers::pi);track.keys.push_back({data.duration,value});
+    }
     if(preset=="single") {
         s.cameraMode=3;
         data=sequence::makeLightShowExample(1,0);auto& track=data.fixtures.front();
@@ -721,7 +731,7 @@ int main(int argc,char** argv) {
     s.time=control(window,TRACKBAR_CLASSW,L"",Time,950,4,280,28,TBS_NOTICKS);SendMessageW(s.time,TBM_SETRANGE,TRUE,MAKELPARAM(0,1000));
     s.target=control(window,L"COMBOBOX",L"",Target,8,42,170,350,CBS_DROPDOWNLIST|WS_VSCROLL);
     s.property=control(window,L"COMBOBOX",L"",Property,188,42,170,350,CBS_DROPDOWNLIST);
-    for(const auto* name:{L"Intensity",L"Pan",L"Tilt",L"Field half-angle (deg)",L"Pattern rotation",L"Red",L"Green",L"Blue",L"Pattern",L"Strobe Hz",L"Volume strength",L"Core half-angle (deg)",L"Aperture radius (units)",L"Pattern focus",L"Iris opening",L"Pattern scale",L"Shadow softness (px)",L"Units: 0 legacy / 1 cd / 2 lm"})SendMessageW(s.property,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));
+    for(const auto* name:{L"Intensity",L"Pan",L"Tilt",L"Field half-angle (deg)",L"Pattern rotation",L"Red",L"Green",L"Blue",L"Pattern",L"Strobe Hz",L"Volume strength",L"Core half-angle (deg)",L"Aperture radius (units)",L"Pattern focus",L"Iris opening",L"Pattern scale",L"Shadow softness (px)",L"Units: 0 legacy / 1 cd / 2 lm",L"Focus distance (units)",L"Prism lobes (1=off)",L"Prism tilt (deg)",L"Prism rotation (deg)"})SendMessageW(s.property,CB_ADDSTRING,0,reinterpret_cast<LPARAM>(name));
     SendMessageW(s.property,CB_SETCURSEL,0,0);s.targets();
     s.value=control(window,TRACKBAR_CLASSW,L"",Value,370,39,230,30,TBS_NOTICKS);SendMessageW(s.value,TBM_SETRANGE,TRUE,MAKELPARAM(0,1000));SendMessageW(s.value,TBM_SETPOS,TRUE,500);
     s.valueReadout=control(window,L"STATIC",L"",0,604,46,76,22);s.updateReadout();

@@ -36,6 +36,11 @@ struct FixtureState {
     float shadowSoftness = 0;
     /// Schema5: physical units assume meters; Legacy preserves previous shows.
     ShowIntensityUnit intensityUnit = ShowIntensityUnit::Legacy;
+    /// Schema6: geometric focus distance (0 disables), equal-energy prism
+    /// lobes1..8, tilt0...35rad, continuous rotation in radians.
+    float focusDistance=0;
+    std::uint8_t prismCount=1;
+    float prismAngle=0,prismRotation=0;
 };
 struct FixtureKey {
     double time = 0;

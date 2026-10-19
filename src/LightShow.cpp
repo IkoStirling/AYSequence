@@ -31,6 +31,8 @@ FixtureState mix(const FixtureState& a, const FixtureState& b, float t) {
     out.innerAngle = mix(a.innerAngle,b.innerAngle,t); out.outerAngle = mix(a.outerAngle,b.outerAngle,t);
     out.volumetric = mix(a.volumetric,b.volumetric,t);
     out.apertureRadius = mix(a.apertureRadius,b.apertureRadius,t);
+    out.focusDistance=mix(a.focusDistance,b.focusDistance,t);
+    out.prismAngle=mix(a.prismAngle,b.prismAngle,t);out.prismRotation=mix(a.prismRotation,b.prismRotation,t);
     out.shadowSoftness = mix(a.shadowSoftness,b.shadowSoftness,t);
     out.goboRotation = mix(a.goboRotation,b.goboRotation,t); out.goboScale = mix(a.goboScale,b.goboScale,t);
     out.goboFocus = mix(a.goboFocus,b.goboFocus,t); out.iris = mix(a.iris,b.iris,t);
@@ -52,6 +54,9 @@ bool fixtureValid(const FixtureState& s) {
         && finite(s.shadowSoftness,0,4)
         && finite(s.goboRotation,-100000,100000) && finite(s.goboScale,.01f,100)
         && finite(s.goboFocus,0,1) && finite(s.iris,.01f,1)
+        && finite(s.focusDistance,0,10000)&&s.prismCount>=1&&s.prismCount<=8
+        && finite(s.prismAngle,0,.35f)&&finite(s.prismRotation,-100000,100000)
+        && (s.outerAngle+s.prismAngle<=1.56f)
         && s.gobo <= ShowGobo::Texture && s.intensityUnit <= ShowIntensityUnit::Lumen;
 }
 }
