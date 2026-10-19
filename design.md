@@ -336,3 +336,19 @@ Studio --indirect-lighting 启用单次屏幕漫反射，独立于 --reflections
 --indirect-strength [0,1]、--indirect-distance [.1,100]、--indirect-rays [1,4]、
 --indirect-steps [4,32] 为有界预览控制；默认.5/10/4/24，schema7不变。
 只从屏幕内已照亮的不透明接收面采色，不包含离屏GI、玻璃折射或灯口/体积的反弹。
+
+
+## 2026-10-19 体积积分分辨率
+
+Studio --fog-resolution 1|2|4 选择原始、每轴半分辨率、每轴四分之一分辨率散射积分。
+默认1保持原表现。重建按深度拒绝跨面散射，消光/场景颜色/alpha维持完整视口；schema7不变。
+无历史积累或froxel；离散小光束可能欠采样。固定--frames使用1/60演出步长，便于相同帧序列性能对照。
+
+
+## 2026-10-19 性能采样
+
+--profile-gpu显式开启逐视图查询并隐藏文字HUD，默认关闭，查询本身有成本。
+性能JSON增加gpuProfiling、fogResolution、meanVolumeGpuMs/meanLightingGpuMs/meanShadowGpuMs，
+以及rigidInstancedDraws/rigidInstancedObjects；未启用/不支持分项为0。
+后者是本帧所有相关Pass的实例提交数（包含阴影重复），不是去重灯具数。
+灯壳按共享部件连续提交，保留原矩阵并减少GBuffer/Shadow逐对象提交。
