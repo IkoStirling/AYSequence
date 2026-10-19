@@ -455,3 +455,35 @@ Debug/D3D11 1920x828,64 fixtures/10k points,16 aggregate lights,80 surface/12 vo
 24 steps,90 samples: initial smooth aggregation25.8929ms; cached smooth5.3723ms.
 Final hard/smooth/contact aggregation4.1573/5.3723/7.3837ms, GPU11.4194/12.6907/15.6380ms.
 All retain10k visible instances/16 lights. Process timing varies; no universal FPS claim.
+
+### GPU点阵筛选、压缩与间接绘制（显式会话选项）
+
+EmissivePointSettings.preferGpuCulling默认false；Windows D3D11/12具有compute/instancing/indirect及RGBA32F image-write时可用。
+仅当source.size()<=maxPoints才走GPU；较小显示预算整批回CPU稳定ID排名，preferInstancing=false也保留CPU四边形。
+源数据仍在CPU求值/验证，32-byte输入上传；mark、256点分块计数、前缀和、按原顺序压缩4vec4/64-byte实例，最后一个索引间接四边形绘制。
+GPU与CPU共享XY/w裁剪、最小像素半径及面积能量公式，不额外加Z裁剪；可见筛选不影响独立的CPU点照明聚合。
+Renderer每设备最多8个存活GPU cloud state；缓冲按256..65536的二次幂扩容，不占瞬态实例预算。
+4个compute及raw draw vertex/fragment共6阶段在构建时烘焙为s_5_0 DXBC并嵌入，无运行时shaderc路径；73个标准生产变体仍单独覆盖。
+
+cloud.stats()是append刷新的值快照。GPU模式countsExact=false，visible/culled为未知0，不能称为实际0可见；source仍是当前输入数。
+gpuDiagnostics默认false，正常GPU绘制不读回、不等待。开启后，gpuSampleValid/source/visible/serial标记较早提交的异步样本，可能跨多个帧。
+计算、blit、readTexture请求分开提交，越过返回完成帧后才消费；一个state最多一个在途读回。销毁state会取消尚未排队的请求，
+已排队CPU目标由Renderer context保活到完成/设备关闭后，避免销毁cloud时写入已释放内存。
+GPU流在OwnedCpu RenderScene中仍借用Cloud状态，必须保持owner到render结束，不能跨下一次append保留GPU帧；设备重建后重建Cloud/Presenter。
+
+固定view50/51/52/53为mark/count/prefix/compact，54为诊断blit，排在主渲染之前；UI离屏单视图上限因此从142降为137。
+RenderFrameStats.pointGpuTimeMs/pointGpuReadbackTimeMs分别统计四个计算视图和blit，GPU帧号/0含义沿用原诊断；后者不含CPU映射或排队延迟。
+Studio --point-gpu显式启用，--point-gpu-readback再启用带序号样本；--point-cpu保留CPU四边形。JSON增加gpuPointCulling、pointCountsExact、
+gpuPointFallback、gpuPointSampleValid/Serial/Source/Visible及meanPointGpuMs/meanPointGpuReadbackMs。
+CameraRenderView即使没有不透明几何也执行请求的颜色/深度清屏，避免纯点阵或空帧保留上一张输出。
+
+2026-10-20 GPU point acceptance: D3D11/D3D12 each2 cases/231 assertions,
+all full-image CPU/GPU comparisons max difference0, including dense65536 last output,
+partial257 tiles, oblique camera, subpixel energy, black frames, budgets, path switch,
+readback-in-flight owner destruction and device shutdown. Six baked stages built.
+Contracts177/2343, SceneMaterial79/10401, UI114/377, FrameGraph41/159,
+PostProcess252/1373, Sequence120/4157, Shader12/213(73 standard variants) passed.
+Inventory1046/10 and120/3; SDK129 capabilities/53 modules/99 searches/566 symbols,0 errors/warnings.
+Same Debug/D3D11 90 samples: point CPU1.9881->.9917ms; GPU compute.7098ms.
+Frame CPU23.5177->22.0014ms, GPU12.0987->12.6955ms, a measured tradeoff.
+Async sample10000/10000; D3D12 combined sample1000/1000 with froxel history/contact/shutter passed.
