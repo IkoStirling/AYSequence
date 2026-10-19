@@ -5,6 +5,15 @@
 #include <algorithm>
 #include <chrono>
 namespace ayt::sequence {
+void LightShowPresenter::releaseResources(render::Renderer& renderer){
+    _points.releaseResources(renderer);_emitters.releaseResources(renderer);_housings.releaseResources(renderer);
+    if(_fogRenderer==&renderer){
+        if(_fogTexture.isValid())renderer.destroyTexture(_fogTexture);
+        _fogRenderer=nullptr;_fogSource.reset();_fogProfile.reset();_fogTexture={};
+    }
+    _pointLightingHistory.reset();_pointLightingStats={};_frameStats={};
+}
+
 void LightShowPresenter::bindGoboTexture(std::uint32_t fixtureId,render::TextureHandle texture) {
     if(texture.isValid())_goboTextures[fixtureId]=texture;
     else _goboTextures.erase(fixtureId);

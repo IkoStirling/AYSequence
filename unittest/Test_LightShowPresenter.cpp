@@ -41,4 +41,16 @@ TEST_CASE(point_lighting_history_is_optional_bounded_and_explicit_seek_reset_res
  settings.maxLights=0;presenter.setPointLighting(settings);CHECK(presenter.append(renderer,scene,frame,identity,identity,64,64,{},pointSettings));CHECK(presenter.pointLightingStats().source==2);CHECK(presenter.pointLightingStats().selectedLights==0);
  renderer.shutdown();
 }
+
+TEST_CASE(explicit_cache_release_is_idempotent_and_presenter_can_reopen_on_live_renderer) {
+ render::Renderer renderer;render::InitDesc init;init.backend=render::Backend::Noop;CHECK(renderer.initialize(init));
+ sequence::LightShowPresenter presenter;presenter.setFixtureEmitters(true);presenter.setFixtureHousings(true);presenter.setProfilingEnabled(true);
+ sequence::LightShowFrame frame;frame.fixtures.push_back({1,{}});frame.points.push_back({1,{0,0,0},{1,1,1},2,.1f});
+ frame.fog.authored=true;frame.fog.value.local=true;frame.fog.grid=std::make_shared<const sequence::ShowFogGrid>(sequence::ShowFogGrid{2,2,2,{255,255,255,255,255,255,255,255}});
+ const auto identity=math::Float4x4::identity();render::RenderScene scene;
+ CHECK(presenter.append(renderer,scene,frame,identity,identity,64,64));const auto oldAtlas=renderer.volumetricDensityField().texture.id;CHECK(oldAtlas!=0);CHECK(presenter.pointStats().source==1);CHECK(presenter.fixtureHousingStats().fixtures==1);
+ scene.clear();presenter.releaseResources(renderer);presenter.releaseResources(renderer);CHECK(!renderer.volumetricDensityField().profile);CHECK(presenter.pointStats().source==0);CHECK(presenter.fixtureHousingStats().fixtures==0);CHECK(!presenter.frameStats().completed);
+ CHECK(presenter.append(renderer,scene,frame,identity,identity,64,64));CHECK(renderer.volumetricDensityField().texture.id!=oldAtlas);CHECK(presenter.pointStats().source==1);CHECK(presenter.fixtureHousingStats().fixtures==1);CHECK(presenter.frameStats().completed);
+ scene.clear();presenter.releaseResources(renderer);renderer.shutdown();
+}
 TEST_SUITE_END

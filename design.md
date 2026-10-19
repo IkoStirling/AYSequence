@@ -1,5 +1,13 @@
 # AYSequence 设计
 
+## 2026-10-20 文档缓存显式回收
+
+Presenter.releaseResources 依次释放点阵、出光口和灯壳缓存，以及该 Presenter 创建的雾 atlas。
+保留会话配置，清除准备计数/点光排名历史，允许同一存活 Renderer 再次 append。
+调用方先撤下 packet 与共享 facade 副本；Gobo/IES 配对由调用方拥有和销毁。
+Editor 在 owner 主呈现恢复宿主状态后释放自身缓存，密度场句柄比较避免清除宿主绑定。
+
+
 ## 灯光/点阵演出扩展（2026-10-16）
 
 独立LightShow值模型不修改既有Sequence格式/World绑定。Compile校验预算、有限值及编队ID集，

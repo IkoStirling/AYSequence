@@ -1,9 +1,18 @@
 # AYSequence
 
+## 文档预览生命周期（2026-10-20）
+
+LightShowPresenter::releaseResources(renderer) 为 Editor 关闭文档显式回收点阵、出光口、
+灯壳与雾 atlas 缓存；先解绑所有 packet，使用同一存活设备，重复调用无副作用。
+不销毁调用者绑定的 Gobo/IES 纹理，选项可在同一设备上再次 append；设备重建应重建 Presenter。
+主编辑器的 .lshow 页现提供主 Deferred、多轨/灯组/光学与雾关键帧、编队、预算HUD和JSON切换。
+Studio 保留音乐/波形、密度笔刷与资源包导出。AssetIO 当前写 schema8，兼容读取1..7。
+
+
 ## 灯光与发光点演出（2026-10-16）
 
 LightShow.h提供独立的owned快照、灯具键/扫动/频闪、稳定ID点阵编队和绝对时间播放器。
-LightShowAssetIO.h写严格schema7的.lshow JSON，读取schema1时出光口半径置零，
+LightShowAssetIO.h写严格schema8的.lshow JSON，读取schema1时出光口半径置零，
 读取schema1/2时图案焦点清晰且光阑全开，读取schema1/2/3时Gobo贴图路径为空，AYIO原子保存。
 灯具支持有限出光口半径、聚光核心半角和外层发散半角；默认窄角、无图案。
 图案柔焦/光阑可关键帧插值。Texture Gobo使用灯具级相对贴图路径，

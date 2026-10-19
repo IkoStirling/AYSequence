@@ -18,6 +18,12 @@ struct LightShowPresenterFrameStats {
 /// share the caller's camera/time. Does not advance the player or mutate World.
 class LightShowPresenter final {
 public:
+    /// Explicit owner-thread cache release for closing an authoring document.
+    /// Detach all submitted/retained draw packets and discard facade copies
+    /// sharing cache handles first. Use the same live Renderer;
+    /// releases owned caches only, never the caller's Gobo/IES bindings. Idempotent.
+    /// Recreate the presenter after device shutdown/reinitialize.
+    void releaseResources(render::Renderer& renderer);
     /// Enable synchronous CPU stage measurements; default off, no GPU waits.
     /// Disabling clears the last snapshot. Does not change rendering/budgets.
     void setProfilingEnabled(bool enabled) noexcept {_profiling=enabled;if(!enabled)_frameStats={};}
