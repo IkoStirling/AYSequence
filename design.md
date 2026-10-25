@@ -200,8 +200,11 @@ generation 失效，调用者在每个事件回调前检查。S3 增加可选骨
   检测变化并避免每帧重启过渡。播放器只在正向跨越时输出音频提示；seek/暂停
   无副作用。原事件与音频在 `dispatchSequenceCues` 中按时间合并，同时间点先事件。
   整批仍受 owner、generation、batch 和 World 预检保护，只可派发一次。
-- Core 和 SceneSession 不取得主相机/音频设备所有权。游戏呈现层解析镜头 binding、
-  切换主视图、预加载音频并提交播放；失败与去重策略由该层定义。现有 AYEditor
+- Core 不取得主相机/音频设备所有权。SceneSession 可显式启用 3D 镜头切点：
+  预检绑定实体的 viewport 镜头组件，以 session owner 租用 World 相机选择。
+  seek/advance 更新租约，stop/完成/重绑/World teardown 释放；竞争 owner 拒绝，
+  不改写可保存的相机组件。未启用时仍只返回镜头值。音频预加载和实际播放、
+  失败与去重策略由游戏呈现层定义。现有 AYEditor
   页面未增加新轨道控件，`SequenceAuthoring` 的值编辑/时间移动/删除已支持新结构。
 
 ### S5 可选资源管理器接线（2026-10-25）

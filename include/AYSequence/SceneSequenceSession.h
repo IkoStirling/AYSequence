@@ -57,6 +57,10 @@ public:
     bool bind(ayt::entity::World& world, std::shared_ptr<const CompiledSequence> sequence,
               const std::map<std::string, std::uint32_t>& entities,
               std::unique_ptr<SceneAnimationDriver> animation, Diagnostic* error = nullptr);
+    /// Opt in to World-owned 3D camera selection for authored cuts. Call after
+    /// bind and before play; the lease is released on stop/completion/rebind or
+    /// World teardown. Camera components are never edited or serialized.
+    bool enableCameraCuts(std::int32_t viewportId = 0, Diagnostic* error = nullptr);
     /// Acquire exclusive Transform ownership, snapshot once and apply current time.
     bool play(Diagnostic* error = nullptr);
     void pause() noexcept;

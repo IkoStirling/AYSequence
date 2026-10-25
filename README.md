@@ -208,8 +208,13 @@ DopeSheet 拖动关键帧时间，右侧数值字段编辑分量/事件；sectio
 
 `Sequence::cameraCuts` 选择已声明的绑定；对应摄像机的位置/旋转仍可用原有
 Transform 轨道制作。求值输出当前切点的 `cutId`、`binding` 和作者设定的
-`blendSeconds`，由游戏相机呈现层按切点 ID 的变化执行切镜或过渡；求值本身
-不修改主相机状态。`audioCues` 记录便携 `.aud` 路径、时间和增益，播放越过
+`blendSeconds`；纯求值本身不修改主相机状态。
+`SceneSequenceSession::enableCameraCuts(viewportId)` 可显式接入 World-owned 3D
+相机选择。绑定的实体须有目标 viewport 的 `PerspectiveCameraComponent`；播放、
+定位和逐步求值使用切点的相机及过渡秒数，停止、完成、重绑与 World 销毁会
+释放租约并恢复原有选镜。不同序列不能同时租用同一 viewport。未启用时仍只
+返回纯求值结果，游戏也可自管镜头。
+`audioCues` 记录便携 `.aud` 路径、时间和增益，播放越过
 时间点时在 owned `PlaybackFrame` 中出现。seek、暂停和零时间步不发声。
 `dispatchSequenceCues` 将事件和音频提示按时间派发，同时间点先事件后音频，
 保留 SceneSession 的一次性批次与 World 生命周期校验。音频资源解析和实际播放

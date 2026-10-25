@@ -2,6 +2,9 @@
 #include <AYEntity.h>
 #include <AYEntity/EntityModule.h>
 #include <AYEntity/EntityRuntimeModule.h>
+#include <AYEntity/PerspectiveCameraSelection.h>
+#include <AYEntity/CameraRuntime.h>
+#include <AYEntity/components/PerspectiveCameraComponent.h>
 #include <AYGameLoop.h>
 #include <AYGameLoop/SubSystemRegistry.h>
 #include <AYModule/ModuleManager.h>
@@ -53,6 +56,61 @@ public:
 };
 }
 TEST_SUITE(SceneSequenceTests)
+TEST_CASE(camera_cuts_lease_the_viewport_and_restore_authored_selection) {
+    (void)registerEntityCoreComponents(ComponentRegistry::instance());
+    ayt::scene::Scene scene{ayt::scene::SceneMode::Play, "camera-cuts"};
+    auto& world=scene.world();
+    auto* base=world.createSpatialEntity();
+    auto* shot=world.createSpatialEntity();
+    auto* baseLens=base->createComponent<PerspectiveCameraComponent>();
+    auto* shotLens=shot->createComponent<PerspectiveCameraComponent>();
+    CHECK(baseLens != nullptr); CHECK(shotLens != nullptr);
+    shotLens->active=false;
+    Sequence authored; authored.id="camera-cut"; authored.duration=4;
+    authored.bindings={{"shot"}};
+    authored.cameraCuts={{"cut", "shot", 0, 0.25}};
+    auto session=std::make_shared<SceneSequenceSession>();
+    CHECK(session->bind(world,CompiledSequence::compile(authored),
+        {{"shot",shot->getId()}}));
+    CHECK(session->enableCameraCuts());
+    CHECK(selectPerspectiveCamera3D(world).entity==base);
+    CHECK(session->play());
+    CHECK(selectPerspectiveCamera3D(world).entity==shot);
+    CHECK(cameraRuntime(world).cinematicCamera(0).blendSeconds==0.25f);
+    auto competitor=std::make_shared<SceneSequenceSession>();
+    CHECK(competitor->bind(world,CompiledSequence::compile(authored),
+        {{"shot",shot->getId()}}));
+    CHECK(competitor->enableCameraCuts());
+    CHECK_FALSE(competitor->play());
+    CHECK(selectPerspectiveCamera3D(world).entity==shot);
+    session->stop();
+    CHECK(selectPerspectiveCamera3D(world).entity==base);
+    CHECK(session->play());
+    SceneFrame frame;
+    CHECK(session->advance(4,frame));
+    CHECK(session->state()==PlaybackState::Completed);
+    CHECK(selectPerspectiveCamera3D(world).entity==base);
+}
+TEST_CASE(camera_cut_lease_is_revoked_before_world_teardown) {
+    (void)registerEntityCoreComponents(ComponentRegistry::instance());
+    auto session=std::make_shared<SceneSequenceSession>();
+    {
+        ayt::scene::Scene scene{ayt::scene::SceneMode::Play,"camera-teardown"};
+        auto& world=scene.world();
+        auto* camera=world.createSpatialEntity();
+        CHECK(camera->createComponent<PerspectiveCameraComponent>() != nullptr);
+        Sequence authored; authored.id="camera-teardown"; authored.duration=1;
+        authored.bindings={{"shot"}};
+        authored.cameraCuts={{"cut","shot",0,0}};
+        CHECK(session->bind(world,CompiledSequence::compile(authored),
+            {{"shot",camera->getId()}}));
+        CHECK(session->enableCameraCuts());
+        CHECK(session->play());
+        CHECK(selectPerspectiveCamera3D(world).entity==camera);
+    }
+    CHECK(session->state()==PlaybackState::Stopped);
+    CHECK_FALSE(session->play());
+}
 TEST_CASE(two_objects_scrub_and_stop_restore_original_state) {
     Fixture f; auto s=f.session(); SceneFrame out;
     CHECK_TRUE(s->seek(2,out)); CHECK(f.left->getComponent<Transform>()->position.x==4); CHECK(f.right->getComponent<Transform>()->scale.y==2); CHECK(std::abs(f.right->getComponent<Transform>()->rotation.y-std::sqrt(0.5f))<1e-5f); CHECK(out.playback.events.empty());

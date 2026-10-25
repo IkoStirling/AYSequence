@@ -3,6 +3,8 @@
 #include <AYEntity/World.h>
 #include <AYEntity/EntityImpl.h>
 #include <AYEntity/WorldLifecycle.h>
+#include <AYEntity/CameraRuntime.h>
+#include <AYEntity/components/PerspectiveCameraComponent.h>
 #include <AYEntity/components/TransformComponent.h>
 #include <AYEntity/components/SimTransformComponent.h>
 #include <AYEntity/components/DetSimTransformComponent.h>
@@ -53,6 +55,8 @@ struct SceneSequenceSession::Impl {
     bool dispatching = false;
     std::unique_ptr<SceneAnimationDriver> animation;
     SequenceSubSystem* host = nullptr;
+    std::int32_t cameraViewport = -1;
+    bool cameraLeaseActive = false;
     Diagnostic error;
     std::vector<DebugEvent> debugEvents;
 };
@@ -96,8 +100,34 @@ bool SceneSequenceSession::bind(World& w, std::shared_ptr<const CompiledSequence
     if (animation && !animation->prepare(w,*s,ids,e)) return false;
     for (const auto& [id,h] : next) if (!transform(w,h) || conflict(w,h)) return fail("Binding changed during resource preparation: " + id);
     stop(); _impl->world = &w; _impl->bindings = std::move(next); _impl->player.bind(std::move(s));
+    _impl->cameraViewport = -1;
     _impl->animation = std::move(animation);
     _impl->error = {}; if (e) *e = {}; return true;
+}
+bool SceneSequenceSession::enableCameraCuts(std::int32_t viewportId, Diagnostic* e) {
+    auto fail = [&](const char* message) {
+        if (e) *e = {"camera", message};
+        return false;
+    };
+    auto& p = *_impl;
+    if (viewportId < 0 || !p.world || !p.player.sequence()
+        || p.player.state() != PlaybackState::Stopped || p.cameraLeaseActive)
+        return fail("Bind and stop a sequence before enabling camera cuts");
+    if (p.player.sequence()->data().cameraCuts.empty())
+        return fail("Sequence has no camera cuts");
+    for (const auto& cut : p.player.sequence()->data().cameraCuts) {
+        const auto found = p.bindings.find(cut.binding);
+        auto* entity = found == p.bindings.end() ? nullptr
+            : p.world->getEntityByHandle(found->second);
+        if (!entity) return fail("Camera binding is missing");
+        bool matched = false;
+        for (const auto* camera : entity->getComponents<ayt::entity::PerspectiveCameraComponent>())
+            matched |= camera && camera->viewportId == viewportId;
+        if (!matched) return fail("Camera binding has no lens for the viewport");
+    }
+    p.cameraViewport = viewportId;
+    if (e) *e = {};
+    return true;
 }
 bool SceneSequenceSession::acquire(Diagnostic* e) {
     auto& p = *_impl;
@@ -146,6 +176,27 @@ bool SceneSequenceSession::apply(const Evaluation& evaluation, Diagnostic* e) {
     if (!check(e)) return false;
     auto& p = *_impl;
     if (p.animation && !p.animation->sample(evaluation,e)) { stop(); return false; }
+    if (p.cameraViewport >= 0) {
+        if (evaluation.camera) {
+            const auto found = p.bindings.find(evaluation.camera->binding);
+            auto* entity = found == p.bindings.end() ? nullptr
+                : p.world->getEntityByHandle(found->second);
+            bool hasLens = false;
+            if (entity)
+                for (const auto* camera : entity->getComponents<ayt::entity::PerspectiveCameraComponent>())
+                    hasLens |= camera && camera->viewportId == p.cameraViewport;
+            if (!hasLens || !ayt::entity::cameraRuntime(*p.world).setCinematicCamera(
+                    p.cameraViewport, p.owner, found->second,
+                    static_cast<float>(evaluation.camera->blendSeconds))) {
+                if (e) *e = {"camera", "Camera lens is missing or another sequence owns the viewport"};
+                stop(); return false;
+            }
+            p.cameraLeaseActive = true;
+        } else if (p.cameraLeaseActive) {
+            ayt::entity::cameraRuntime(*p.world).clearCinematicCamera(p.cameraViewport,p.owner);
+            p.cameraLeaseActive = false;
+        }
+    }
     // Preflight every target before any write. No user callback occurs here.
     for (const auto& sample : evaluation.transforms) {
         const auto h = p.bindings.at(sample.binding);
@@ -161,6 +212,12 @@ bool SceneSequenceSession::apply(const Evaluation& evaluation, Diagnostic* e) {
 }
 void SceneSequenceSession::release() noexcept {
     auto& p = *_impl;
+    if (p.cameraLeaseActive && p.world) {
+        if (auto* system = p.world->findSystemByName("CameraRuntimeSystem"))
+            static_cast<ayt::entity::CameraRuntimeSystem*>(system)->clearCinematicCamera(
+                p.cameraViewport, p.owner);
+        p.cameraLeaseActive = false;
+    }
     if (p.animation) p.animation->release();
     for (const auto& held : p.held) {
         auto claim = registry().claims.find({p.world,held.handle.id});
