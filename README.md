@@ -77,7 +77,7 @@ cmake --build out/build/sequence-bootstrap
 运行时核心不依赖 AYEditor、AYUI、AYScene、AYRenderer、AYAudio 或 AYAnimation。
 World/动画/音频/相机桥接由独立可选 integration targets 承担；UI-free 作者核心
 通过 AYEditor 薄适配接入，复用已有公共作者控件。Entity integration 已实现；
-骨骼 Animation integration、作者核心和 Editor extension 已实现；音频/相机 integration 尚未创建。
+骨骼 Animation integration、作者核心、Editor extension、可选音频预载适配及 3D 相机租约已实现。
 
 ## S1 使用
 
@@ -217,8 +217,13 @@ Transform 轨道制作。求值输出当前切点的 `cutId`、`binding` 和作�
 `audioCues` 记录便携 `.aud` 路径、时间和增益，播放越过
 时间点时在 owned `PlaybackFrame` 中出现。seek、暂停和零时间步不发声。
 `dispatchSequenceCues` 将事件和音频提示按时间派发，同时间点先事件后音频，
-保留 SceneSession 的一次性批次与 World 生命周期校验。音频资源解析和实际播放
-仍由游戏/AYAudio 适配层执行；宿主必须在当帧消费并处理重试策略。
+保留 SceneSession 的一次性批次与 World 生命周期校验。可选
+`AYSequence::AudioIntegration` 的 `SequenceAudioPlayer` 在播放前通过宿主提供的
+loader 预载 `.aud`、去重注册到 AYAudio，派发时只查找并播放。宿主可把
+`player.play(cue)` 作为音频 sink，停止或 seek 时调用 `player.stop()`；重载
+序列时重新 `prepare()`。它最多拥有 256 个不同资源和 256 个活跃声音，失败
+会清空本次预载。`AudioSubSystem` 必须比适配器存活更久；设备重启后须重新预载。
+游戏负责选择资源根、播放总线与报错策略。
 
 加入任一新轨道时 `.seq` 写为 schema 3，仍可读 schema 1/2。通用
 `SequenceAuthoring::edit` 及移动/删除辅助函数支持这两类作者数据；当前 AYEditor

@@ -203,8 +203,11 @@ generation 失效，调用者在每个事件回调前检查。S3 增加可选骨
 - Core 不取得主相机/音频设备所有权。SceneSession 可显式启用 3D 镜头切点：
   预检绑定实体的 viewport 镜头组件，以 session owner 租用 World 相机选择。
   seek/advance 更新租约，stop/完成/重绑/World teardown 释放；竞争 owner 拒绝，
-  不改写可保存的相机组件。未启用时仍只返回镜头值。音频预加载和实际播放、
-  失败与去重策略由游戏呈现层定义。现有 AYEditor
+  不改写可保存的相机组件。未启用时仍只返回镜头值。可选 `AudioIntegration`
+  先通过宿主 loader 取 `IAudio` 并去重注册 AYAudio clip；派发回调只播放已验证
+  cue，不在热路径读文件。失败清空适配器已注册的 clip；最多 256 个源和声音。
+  stop/seek 由宿主停声，音频子系统重启使代际失效，随后须重新 prepare。
+  资源根、总线和错误策略仍由游戏呈现层定义。现有 AYEditor
   页面未增加新轨道控件，`SequenceAuthoring` 的值编辑/时间移动/删除已支持新结构。
 
 ### S6 本地化文字区间（2026-10-25）
@@ -231,7 +234,8 @@ ResourceManager 可缓存并按普通规则驱逐该 CPU 资源；失败加载�
 再复用作者 schema 校验。`AYSequenceCookTool` 离线核对 Assets 根下的引用、原子写
 `.sqc`；可选 ResourceManager 接线读取 loose 或 Pak 的 `.sqc`，旧快照仍按原
 规则保留。此路径尚未接入 CookShip/ProjectBuild，也不自动收集或烘焙引用的
-场景/动画/音频，或提供音频预加载和主相机执行适配。
+场景/动画/音频；音频预加载与主相机执行分别由可选 `AudioIntegration` 和
+`SceneSequenceSession::enableCameraCuts` 提供。
 - 页面提供绑定、三类 Transform 轨道、事件、Clip 片段、时间和数值编辑；空的
   value/animation track 不合法，删最后 item 时删轨道。被引用 binding 删除拒绝。
 - DopeSheet 复用稳定 ID/选择；动画 section 独立 block 视图，中间移动、两端裁剪。
