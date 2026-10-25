@@ -18,6 +18,7 @@ Sequence content() {
     source.bindings = {{"camera"}};
     source.cameraCuts = {{"intro", "camera", 0, 0}};
     source.audioCues = {{"sound", "audio/intro.aud", 1, 0.8}};
+    source.textCues = {{"subtitle", "line.intro", "speaker.npc", 0.5, 2}};
     return source;
 }
 }
@@ -35,6 +36,7 @@ TEST_CASE(resource_manager_caches_and_reload_retains_old_snapshot) {
     CHECK(loaded->isLoaded());
     CHECK(loaded->sizeInBytes() > sizeof(SequenceResource));
     CHECK(loaded->snapshot()->data().audioCues.size() == 1);
+    CHECK(loaded->snapshot()->data().textCues[0].textKey == "line.intro");
     CHECK(manager.load<SequenceResource>(path) == loaded);
     auto old = loaded->snapshot();
     auto modified = content(); modified.duration = 4;
@@ -66,6 +68,7 @@ TEST_CASE(binary_loader_validates_and_owns_sequence_snapshot) {
         loader->loadFromBinary(encoded.data(), encoded.size()));
     CHECK_TRUE(loaded != nullptr);
     CHECK(loaded->snapshot()->data().cameraCuts[0].binding == "camera");
+    CHECK(loaded->snapshot()->data().textCues.size() == 1);
     const auto old = loaded->snapshot();
     CHECK_FALSE(loaded->decode("{bad", 4));
     CHECK(loaded->snapshot() == old);

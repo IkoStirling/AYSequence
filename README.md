@@ -224,6 +224,15 @@ Transform 轨道制作。求值输出当前切点的 `cutId`、`binding` 和作�
 `SequenceAuthoring::edit` 及移动/删除辅助函数支持这两类作者数据；当前 AYEditor
 序列页面尚无专门的镜头/音频轨道控件，可由外部作者工具通过同一数据模型生成。
 
+### 本地化文字区间
+
+`Sequence::textCues` 提供带 `textKey`、可选 `speakerKey` 和 `[start,end)`
+区间的本地化文字提示。`CompiledSequence::evaluate` 与每个播放帧都返回当前
+有效的 owned 提示；seek、暂停或零时间步也可恢复正确字幕，区间结束即消失。
+文字键的本地化查询、字体与 UI 绘制由游戏负责。含文字提示的 `.seq` 写
+schema 4；schema 1/2/3 保持可读。作者编辑可移动/删除文字提示，Cooked
+`.sqc` 与 ResourceManager 加载走相同校验。当前编辑器尚无专门的字幕轨道控件。
+
 ### 可选 ResourceManager 加载
 
 根构建同时启用 AYResource 与 Sequence AssetIO 时，链接

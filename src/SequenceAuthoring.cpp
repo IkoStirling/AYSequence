@@ -19,6 +19,8 @@ void sortRows(Sequence &s) {
                      [](const auto &a, const auto &b) { return a.time < b.time; });
     std::stable_sort(s.audioCues.begin(), s.audioCues.end(),
                      [](const auto &a, const auto &b) { return a.time < b.time; });
+    std::stable_sort(s.textCues.begin(), s.textCues.end(),
+                     [](const auto &a, const auto &b) { return a.start < b.start; });
 }
 std::unordered_set<std::string> allIds(const Sequence &s) {
     std::unordered_set<std::string> ids{s.id};
@@ -41,6 +43,7 @@ std::unordered_set<std::string> allIds(const Sequence &s) {
     }
     for (const auto &cut : s.cameraCuts) ids.insert(cut.id);
     for (const auto &cue : s.audioCues) ids.insert(cue.id);
+    for (const auto &cue : s.textCues) ids.insert(cue.id);
     return ids;
 }
 } // namespace
@@ -130,6 +133,11 @@ bool moveSequenceItems(Sequence &s, const std::vector<std::string> &ids, double 
         if (remaining.erase(cut.id)) cut.time += delta;
     for (auto &cue : s.audioCues)
         if (remaining.erase(cue.id)) cue.time += delta;
+    for (auto &cue : s.textCues)
+        if (remaining.erase(cue.id)) {
+            cue.start += delta;
+            cue.end += delta;
+        }
     if (!remaining.empty())
         return false;
     sortRows(s);
@@ -147,6 +155,7 @@ bool removeSequenceItems(Sequence &s, const std::vector<std::string> &ids) {
         std::erase_if(t.events, [&](const auto &k) { return remaining.erase(k.id) != 0; });
     std::erase_if(s.cameraCuts, [&](const auto &cut) { return remaining.erase(cut.id) != 0; });
     std::erase_if(s.audioCues, [&](const auto &cue) { return remaining.erase(cue.id) != 0; });
+    std::erase_if(s.textCues, [&](const auto &cue) { return remaining.erase(cue.id) != 0; });
     std::erase_if(s.transforms, [](const auto &t) { return t.keys.empty(); });
     std::erase_if(s.animations, [](const auto &t) { return t.sections.empty(); });
     return remaining.empty();

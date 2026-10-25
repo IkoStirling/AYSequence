@@ -73,7 +73,8 @@ bool validate(const Sequence& s, Diagnostic* e) {
     if (!std::isfinite(s.duration) || s.duration <= 0 || s.duration > 86400) return fail(e, "duration", "Expected 0 < duration <= 86400 seconds");
     if (!std::isfinite(s.displayFps) || s.displayFps < 1 || s.displayFps > 240) return fail(e, "displayFps", "Expected display rate in [1,240]");
     if (s.bindings.size() > 1024 || s.transforms.size() + s.animations.size() + s.eventTracks.size() > 4096
-        || s.cameraCuts.size() > 1024 || s.audioCues.size() > 10000)
+        || s.cameraCuts.size() > 1024 || s.audioCues.size() > 10000
+        || s.textCues.size() > 10000)
         return fail(e, "tracks", "Sequence exceeds binding/track/cue limits");
     std::unordered_set<std::string> ids{s.id}, bindings, channels;
     auto addId = [&](const std::string& id) { return idValid(id) && ids.insert(id).second; };
@@ -148,6 +149,16 @@ bool validate(const Sequence& s, Diagnostic* e) {
     }
     if (eventCount + s.audioCues.size() > 10000)
         return fail(e, "cues", "Too many timed events and audio cues");
+    double previousText = -1;
+    for (const auto& cue : s.textCues) {
+        if (!addId(cue.id) || !idValid(cue.textKey)
+            || (!cue.speakerKey.empty() && !idValid(cue.speakerKey))
+            || !timeValid(cue.start, s.duration)
+            || !timeValid(cue.end, s.duration) || cue.end <= cue.start
+            || cue.start < previousText)
+            return fail(e, cue.id, "Invalid text cue ID, key or interval");
+        previousText = cue.start;
+    }
     return true;
 }
 CompiledSequence::CompiledSequence(Sequence s) : _data(std::move(s)) {
@@ -174,6 +185,10 @@ bool CompiledSequence::evaluate(double time, Evaluation& output, Diagnostic* e) 
     if (rightCut != _data.cameraCuts.begin()) {
         const auto& cut = *(rightCut - 1);
         next.camera = CameraSample{cut.id, cut.binding, cut.blendSeconds};
+    }
+    for (const auto& cue : _data.textCues) {
+        if (cue.start > time) break;
+        if (time < cue.end) next.textCues.push_back(cue);
     }
     output = std::move(next); if (e) *e = {}; return true;
 }

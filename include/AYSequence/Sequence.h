@@ -39,6 +39,13 @@ struct AudioCue {
     double time = 0, gain = 1;
     bool operator==(const AudioCue&) const = default;
 };
+/// Localized text interval for a presentation layer. Keys are stable content
+/// IDs, not rendered strings; [start,end) stays evaluable after seeks.
+struct TextCue {
+    std::string id, textKey, speakerKey;
+    double start = 0, end = 0;
+    bool operator==(const TextCue&) const = default;
+};
 struct Sequence {
     std::string id;
     double duration = 1, displayFps = 30;
@@ -48,6 +55,7 @@ struct Sequence {
     std::vector<EventTrack> eventTracks;
     std::vector<CameraCut> cameraCuts;
     std::vector<AudioCue> audioCues;
+    std::vector<TextCue> textCues;
     // Optional schema 2 authoring locator, relative to the project's Assets root.
     // Exact unique entity names are not persistent GUIDs; rename requires rebinding.
     std::string scenePath;
@@ -60,6 +68,7 @@ struct Evaluation {
     std::vector<TransformSample> transforms;
     std::vector<AnimationSample> animations;
     std::optional<CameraSample> camera;
+    std::vector<TextCue> textCues; // Active at this time, including direct seek.
 };
 struct Diagnostic { std::string location, message; };
 

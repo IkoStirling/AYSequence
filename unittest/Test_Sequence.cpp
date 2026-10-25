@@ -129,6 +129,43 @@ TEST_CASE(camera_audio_validation_rejects_bad_authored_content) {
     f = fixture(); f.cameraCuts = {{"ev0", "left", 0, 0}};
     CHECK_FALSE(validate(f));
 }
+TEST_CASE(localized_text_intervals_are_owned_and_seekable) {
+    auto f = fixture();
+    f.textCues = {{"caption-a", "line.intro", "speaker.a", 0, 2},
+                  {"caption-b", "line.reply", "speaker.b", 1.5, 4}};
+    auto compiled = CompiledSequence::compile(f);
+    CHECK_TRUE(compiled != nullptr);
+    Evaluation evaluation;
+    CHECK_TRUE(compiled->evaluate(0, evaluation));
+    CHECK(evaluation.textCues.size() == 1);
+    CHECK(evaluation.textCues[0].textKey == "line.intro");
+    CHECK_TRUE(compiled->evaluate(1.5, evaluation));
+    CHECK(evaluation.textCues.size() == 2);
+    CHECK_TRUE(compiled->evaluate(2, evaluation));
+    CHECK(evaluation.textCues.size() == 1);
+    CHECK(evaluation.textCues[0].speakerKey == "speaker.b");
+    CHECK_TRUE(compiled->evaluate(4, evaluation));
+    CHECK(evaluation.textCues.empty());
+    SequencePlayer player; player.bind(compiled);
+    PlaybackFrame frame;
+    CHECK_TRUE(player.seek(1.75, frame));
+    CHECK(frame.evaluation.textCues.size() == 2);
+    CHECK(frame.events.empty() && frame.audioCues.empty());
+    CHECK_TRUE(player.play());
+    player.pause();
+    CHECK_TRUE(player.advance(0, frame));
+    CHECK(frame.evaluation.textCues.size() == 2);
+    std::string bytes;
+    CHECK_TRUE(encodeSequence(f, bytes));
+    CHECK(bytes.find("\"version\": 4") != std::string::npos);
+    Sequence decoded;
+    CHECK_TRUE(decodeSequence(bytes, decoded));
+    CHECK(decoded == f);
+    f.textCues[0].textKey.clear(); CHECK_FALSE(validate(f));
+    f = decoded; f.textCues[0].start = 1.75; CHECK_FALSE(validate(f));
+    f = decoded; f.textCues[0].end = f.textCues[0].start;
+    CHECK_FALSE(validate(f));
+}
 TEST_SUITE_END
 
 TEST_SUITE(SequenceAssetTests)

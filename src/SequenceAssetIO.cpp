@@ -32,17 +32,21 @@ bool decodeSequence(std::string_view bytes, Sequence& output, Diagnostic* e) {
             return true;
         });
         if (j.at("type") != "authoring.scene-sequence" || !j.at("version").is_number_integer()
-            || (j.at("version") != 1 && j.at("version") != 2 && j.at("version") != 3))
+            || (j.at("version") != 1 && j.at("version") != 2
+                && j.at("version") != 3 && j.at("version") != 4))
             return fail(e, "Unsupported sequence type/version");
-        const bool cues = j.at("version") == 3;
+        const bool textCues = j.at("version") == 4;
+        const bool cues = j.at("version") == 3 || textCues;
         const bool authoring = j.at("version") == 2 || cues;
-        if (cues) fields(j, {"type", "version", "id", "duration", "displayFps", "bindings", "transforms", "animations", "eventTracks", "scenePath", "cameraCuts", "audioCues"});
+        if (textCues) fields(j, {"type", "version", "id", "duration", "displayFps", "bindings", "transforms", "animations", "eventTracks", "scenePath", "cameraCuts", "audioCues", "textCues"});
+        else if (cues) fields(j, {"type", "version", "id", "duration", "displayFps", "bindings", "transforms", "animations", "eventTracks", "scenePath", "cameraCuts", "audioCues"});
         else if (authoring) fields(j, {"type", "version", "id", "duration", "displayFps", "bindings", "transforms", "animations", "eventTracks", "scenePath"});
         else fields(j, {"type", "version", "id", "duration", "displayFps", "bindings", "transforms", "animations", "eventTracks"});
         Sequence s; s.id = j.at("id").get<std::string>(); s.duration = number(j.at("duration")); s.displayFps = number(j.at("displayFps"));
         if (authoring) s.scenePath = j.at("scenePath").get<std::string>();
         arrayLimit(j.at("bindings"), 1024); arrayLimit(j.at("transforms"), 4096); arrayLimit(j.at("animations"), 4096); arrayLimit(j.at("eventTracks"), 4096);
         if (cues) { arrayLimit(j.at("cameraCuts"), 1024); arrayLimit(j.at("audioCues"), 10000); }
+        if (textCues) arrayLimit(j.at("textCues"), 10000);
         for (const auto& b : j.at("bindings")) {
             if (authoring) fields(b, {"id", "entityName"}); else fields(b, {"id"});
             s.bindings.push_back({b.at("id").get<std::string>(), authoring ? b.at("entityName").get<std::string>() : std::string{}});
@@ -88,6 +92,14 @@ bool decodeSequence(std::string_view bytes, Sequence& output, Diagnostic* e) {
                     number(cue.at("time")), number(cue.at("gain"))});
             }
         }
+        if (textCues) {
+            for (const auto& cue : j.at("textCues")) {
+                fields(cue, {"id", "textKey", "speakerKey", "start", "end"});
+                s.textCues.push_back({cue.at("id"), cue.at("textKey"),
+                    cue.at("speakerKey"), number(cue.at("start")),
+                    number(cue.at("end"))});
+            }
+        }
         if (!validate(s, e)) return false;
         output = std::move(s); return true;
     } catch (const std::exception& ex) { return fail(e, ex.what()); }
@@ -96,9 +108,10 @@ bool encodeSequence(const Sequence& s, std::string& output, Diagnostic* e) {
     if (!validate(s, e)) return false;
     try {
         Json j = {{"type", "authoring.scene-sequence"}, {"version", 1}, {"id", s.id}, {"duration", s.duration}, {"displayFps", s.displayFps}, {"bindings", Json::array()}, {"transforms", Json::array()}, {"animations", Json::array()}, {"eventTracks", Json::array()}};
-        const bool cues = !s.cameraCuts.empty() || !s.audioCues.empty();
+        const bool textCues = !s.textCues.empty();
+        const bool cues = textCues || !s.cameraCuts.empty() || !s.audioCues.empty();
         const bool authoring = cues || !s.scenePath.empty() || std::any_of(s.bindings.begin(), s.bindings.end(), [](const Binding& b) { return !b.entityName.empty(); });
-        if (authoring) { j["version"] = cues ? 3 : 2; j["scenePath"] = s.scenePath; }
+        if (authoring) { j["version"] = textCues ? 4 : cues ? 3 : 2; j["scenePath"] = s.scenePath; }
         for (const auto& b : s.bindings) {
             Json binding = {{"id", b.id}};
             if (authoring) binding["entityName"] = b.entityName;
@@ -127,6 +140,13 @@ bool encodeSequence(const Sequence& s, std::string& output, Diagnostic* e) {
             for (const auto& cue : s.audioCues)
                 j["audioCues"].push_back({{"id", cue.id}, {"source", cue.source},
                     {"time", cue.time}, {"gain", cue.gain}});
+        }
+        if (textCues) {
+            j["textCues"] = Json::array();
+            for (const auto& cue : s.textCues)
+                j["textCues"].push_back({{"id", cue.id},
+                    {"textKey", cue.textKey}, {"speakerKey", cue.speakerKey},
+                    {"start", cue.start}, {"end", cue.end}});
         }
         std::string bytes = j.dump(2);
         if (bytes.size() > maxBytes) return fail(e, "Encoded sequence exceeds 16 MiB");
