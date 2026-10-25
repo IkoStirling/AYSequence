@@ -224,14 +224,19 @@ Transform 轨道制作。求值输出当前切点的 `cutId`、`binding` 和作�
 根构建同时启用 AYResource 与 Sequence AssetIO 时，链接
 `AYSequence::Resources`，调用 `registerSequenceResourceLoader()` 后可使用
 `ResourceManager::load<SequenceResource>(path)` 获取缓存的已验证编译快照。
-注册 `.seq` 与旧 `.ayseq` 只读别名。加载器也可对传入的 JSON 字节执行相同校验；
+注册 `.seq`、旧 `.ayseq` 只读别名及运行时 `.sqc`。加载器可对传入的 JSON 或
+`.sqc` 字节执行相同校验；
 重载失败保留调用方当前 `SequenceResource` 中的旧快照，旧 `CompiledSequence`
 拷贝在成功重载或缓存驱逐后仍有效。`reloadSequenceResource(path)` 用于清除管理器
 的缓存/失败状态并重试散文件。此接线不自动预加载依赖的动画或音频资源，也不
-提供 `.seq` 的 Cook/Pak 生产准入。构建侧可先用
+自动转换 `.seq`。构建侧可先用
 `buildSequenceDependencyManifest(sequence, assetsRoot, output)` 核对场景、动画和音频
 引用均位于 Assets 内的普通文件，并得到去重路径、大小、内容指纹及整体签名。
-发布前应重算以识别计划后的修改；这一步本身不做 Cook/Pak 打包。
+发布前应重算以识别计划后的修改。`AYSequenceCookTool source.seq Assets-root
+output.sqc` 将严格作者文件转换为有界、带校验和及依赖内容签名的 `.sqc`；编码
+失败不替换已有输出。目前尚未接入 CookShip/ProjectBuild；调用方须显式
+将引用的场景、动画与音频烘焙、放入发布树并校对闭包。签名用于内容识别，
+不是可信认证或运行时依赖存在性证明。
 
 ## Extended diagnostic observations (2026-10-15)
 

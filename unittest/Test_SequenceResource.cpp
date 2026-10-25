@@ -1,5 +1,6 @@
 #include <AYSequence/SequenceResource.h>
 #include <AYSequence/SequenceAssetIO.h>
+#include <AYSequence/SequenceCooked.h>
 #include <AYResource/ResourceManager.h>
 #include <AYResource/ResourceRegistry.h>
 #include <AYTest.h>
@@ -57,6 +58,7 @@ TEST_CASE(binary_loader_validates_and_owns_sequence_snapshot) {
     CHECK_TRUE(loader != nullptr);
     CHECK(loader->canLoad("cut.seq"));
     CHECK(loader->canLoad("legacy.ayseq"));
+    CHECK(loader->canLoad("cooked.sqc"));
     CHECK_FALSE(loader->canLoad("cut.txt"));
     std::string encoded;
     CHECK_TRUE(encodeSequence(content(), encoded));
@@ -70,6 +72,35 @@ TEST_CASE(binary_loader_validates_and_owns_sequence_snapshot) {
     CHECK(loaded->unload());
     CHECK_FALSE(loaded->isLoaded());
     CHECK(old->data().id == "resource-sequence");
+}
+
+TEST_CASE(cooked_resource_loads_from_file_and_binary) {
+    ayt::test::ScratchDirectory scratch("sequence-cooked-resource");
+    std::filesystem::create_directories(scratch.path() / "audio");
+    { std::ofstream sound(scratch.path() / "audio/intro.aud",
+        std::ios::binary); sound << "audio-content"; }
+    std::vector<std::uint8_t> bytes;
+    CHECK_TRUE(encodeCookedSequence(content(), scratch.path(), bytes));
+    const auto path = scratch.path() / "cut.sqc";
+    { std::ofstream stream(path, std::ios::binary);
+      stream.write(reinterpret_cast<const char*>(bytes.data()),
+          static_cast<std::streamsize>(bytes.size())); }
+    registerSequenceResourceLoader();
+    auto loader = ayt::resource::ResourceRegistry::createLoader("SceneSequence");
+    auto fromFile = std::dynamic_pointer_cast<SequenceResource>(
+        loader->load(path.string()));
+    CHECK_TRUE(fromFile != nullptr);
+    CHECK(fromFile->snapshot()->data() == content());
+    CHECK(fromFile->dependencySignature() != 0);
+    auto fromBytes = std::dynamic_pointer_cast<SequenceResource>(
+        loader->loadFromBinary(bytes.data(), bytes.size()));
+    CHECK_TRUE(fromBytes != nullptr);
+    CHECK(fromBytes->dependencySignature()
+        == fromFile->dependencySignature());
+    bytes.back() ^= 1;
+    const auto previous = fromFile->snapshot();
+    CHECK_FALSE(fromFile->decode(bytes.data(), bytes.size()));
+    CHECK(fromFile->snapshot() == previous);
 }
 
 TEST_SUITE_END

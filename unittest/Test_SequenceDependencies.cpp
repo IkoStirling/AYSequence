@@ -1,4 +1,5 @@
 #include <AYSequence/SequenceDependencies.h>
+#include <AYSequence/SequenceCooked.h>
 #include <AYTest.h>
 
 #include <chrono>
@@ -49,6 +50,20 @@ TEST_CASE(manifest_tracks_content_and_keeps_output_on_failure) {
     const auto first = manifest.signature;
     CHECK_TRUE(buildSequenceDependencyManifest(sequence, root, manifest));
     CHECK(manifest.signature == first);
+    std::vector<std::uint8_t> cooked;
+    CHECK_TRUE(encodeCookedSequence(sequence, root, cooked));
+    Sequence decoded;
+    SequenceCookedMetadata metadata;
+    CHECK_TRUE(decodeCookedSequence(cooked, decoded, &metadata));
+    CHECK(decoded == sequence);
+    CHECK(metadata.dependencySignature == first);
+    const auto good = cooked;
+    cooked.back() ^= 1;
+    CHECK_FALSE(decodeCookedSequence(cooked, decoded, &metadata));
+    CHECK(decoded == sequence);
+    cooked = good;
+    cooked[4] = 99;
+    CHECK_FALSE(decodeCookedSequence(cooked, decoded));
     write(root / "audio/hit.aud", "audio-b");
     CHECK_TRUE(buildSequenceDependencyManifest(sequence, root, manifest));
     CHECK(manifest.signature != first);

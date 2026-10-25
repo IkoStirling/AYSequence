@@ -22,9 +22,17 @@ if(AY_SEQUENCE_BUILD_ASSET_IO)
     if(NOT TARGET AYIO)
         message(FATAL_ERROR "AYSequenceAssetIO requires AYIO; disable AY_SEQUENCE_BUILD_ASSET_IO for standalone Core")
     endif()
-    add_library(AYSequenceAssetIO STATIC src/SequenceAssetIO.cpp src/SequenceDependencies.cpp src/LightShowAssetIO.cpp src/LightShowBundle.cpp)
+    add_library(AYSequenceAssetIO STATIC src/SequenceAssetIO.cpp src/SequenceDependencies.cpp src/SequenceCooked.cpp src/LightShowAssetIO.cpp src/LightShowBundle.cpp)
     add_library(AYSequence::AssetIO ALIAS AYSequenceAssetIO)
     target_link_libraries(AYSequenceAssetIO PUBLIC AYSequence AYIO PRIVATE AYAssetFormat nlohmann_json::nlohmann_json)
+    add_executable(AYSequenceCookTool tools/SequenceCookTool.cpp)
+    target_link_libraries(AYSequenceCookTool PRIVATE AYSequenceAssetIO AYAssetFormat)
+    if(BUILD_TESTING)
+        add_test(NAME AYSequenceCookToolSmoke COMMAND AYSequenceCookTool
+            "${CMAKE_CURRENT_SOURCE_DIR}/examples/minimal.seq"
+            "${CMAKE_CURRENT_SOURCE_DIR}/examples"
+            "${CMAKE_CURRENT_BINARY_DIR}/minimal.sqc")
+    endif()
 endif()
 if(TARGET AYResource AND TARGET AYSequenceAssetIO)
     add_library(AYSequenceResourceIntegration STATIC src/SequenceResource.cpp)

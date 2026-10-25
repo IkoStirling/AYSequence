@@ -1,0 +1,11 @@
+{
+  "type": "authoring.scene-sequence",
+  "version": 1,
+  "id": "minimal",
+  "duration": 1,
+  "displayFps": 30,
+  "bindings": [],
+  "transforms": [],
+  "animations": [],
+  "eventTracks": []
+}

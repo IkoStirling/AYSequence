@@ -211,8 +211,12 @@ generation 失效，调用者在每个事件回调前检查。S3 增加可选骨
 `SequenceResource` 从 loose 文件或显式 JSON 字节解析、验证并编译不可变快照。
 加载/重载候选完全成功后才替换已有资源内部快照，旧快照由使用者共享拥有。
 ResourceManager 可缓存并按普通规则驱逐该 CPU 资源；失败加载返回空。
-接线不改变 `authoring.scene-sequence` 的发布级别，没有自动资源依赖枚举、
-Cook/Pak 转换、音频预加载或主相机执行适配。
+`SequenceCooked` 使用 32 字节 `AYSQ`/v1 包头、JSON 长度、FNV64 内容校验和、
+依赖清单签名，再附严格规范 JSON（最多 16 MiB）。解码先检查边界与校验和，
+再复用作者 schema 校验。`AYSequenceCookTool` 离线核对 Assets 根下的引用、原子写
+`.sqc`；可选 ResourceManager 接线读取 loose 或 Pak 的 `.sqc`，旧快照仍按原
+规则保留。此路径尚未接入 CookShip/ProjectBuild，也不自动收集或烘焙引用的
+场景/动画/音频，或提供音频预加载和主相机执行适配。
 - 页面提供绑定、三类 Transform 轨道、事件、Clip 片段、时间和数值编辑；空的
   value/animation track 不合法，删最后 item 时删轨道。被引用 binding 删除拒绝。
 - DopeSheet 复用稳定 ID/选择；动画 section 独立 block 视图，中间移动、两端裁剪。

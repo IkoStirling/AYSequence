@@ -7,8 +7,8 @@
 
 namespace ayt::sequence {
 
-/// Optional AYResource CPU wrapper for a validated loose .seq file or
-/// explicitly supplied JSON bytes. A returned compiled snapshot remains valid after
+/// Optional AYResource CPU wrapper for validated loose .seq or cooked .sqc
+/// files and explicitly supplied bytes. A returned compiled snapshot remains valid after
 /// ResourceManager eviction or a later reload.
 class SequenceResource final : public ayt::resource::IResource {
 public:
@@ -19,6 +19,9 @@ public:
     [[nodiscard]] std::shared_ptr<const CompiledSequence> snapshot() const noexcept {
         return _snapshot;
     }
+    [[nodiscard]] std::uint64_t dependencySignature() const noexcept {
+        return _dependencySignature;
+    }
     /// Decode validated .seq JSON bytes without changing an existing good
     /// snapshot on failure. The loader owns the optional resource path.
     [[nodiscard]] bool decode(const void* data, std::size_t size);
@@ -26,9 +29,10 @@ public:
 private:
     std::shared_ptr<const CompiledSequence> _snapshot;
     std::size_t _sourceBytes = 0;
+    std::uint64_t _dependencySignature = 0;
 };
 
-/// Explicitly register .seq and its read-only .ayseq alias before requesting
+/// Explicitly register .seq, cooked .sqc, and the read-only .ayseq alias before requesting
 /// SequenceResource from ResourceManager. Registration is process-global.
 void registerSequenceResourceLoader();
 
