@@ -1,4 +1,4 @@
-add_executable(AYSequence_UnitTests main.cpp Test_Sequence.cpp Test_SequenceAuthoring.cpp Test_LightShow.cpp Test_LightShowFog.cpp)
+add_executable(AYSequence_UnitTests main.cpp Test_Sequence.cpp Test_SequenceDependencies.cpp Test_SequenceAuthoring.cpp Test_LightShow.cpp Test_LightShowFog.cpp)
 target_link_libraries(AYSequence_UnitTests PRIVATE AYSequenceAssetIO AYSequenceEditorCore AYTest nlohmann_json::nlohmann_json)
 if(TARGET AYSequenceResourceIntegration)
     target_sources(AYSequence_UnitTests PRIVATE Test_SequenceResource.cpp)
@@ -24,4 +24,4 @@ if(TARGET AYSequenceRendererIntegration)
 endif()
 file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/test-features.json" "{\"entity\":\"${_sequence_entity_tests}\",\"animation\":\"${_sequence_animation_tests}\",\"renderer\":\"${_sequence_renderer_tests}\"}\n")
 ay_add_test_tiers(AYSequence_UnitTests PREFIX sequence
-    INTEGRATION_SUITES SequenceAssetTests LightShowAssetTests LightShowFogAssetTests LightShowPresenterTests SceneSequenceTests AnimationSequenceTests STRESS_SUITES SequenceStressTests TIMEOUT 60 RUN_SERIAL)
+    INTEGRATION_SUITES SequenceAssetTests SequenceDependencyTests LightShowAssetTests LightShowFogAssetTests LightShowPresenterTests SceneSequenceTests AnimationSequenceTests STRESS_SUITES SequenceStressTests TIMEOUT 60 RUN_SERIAL)

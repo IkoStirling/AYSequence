@@ -228,7 +228,10 @@ Transform 轨道制作。求值输出当前切点的 `cutId`、`binding` 和作�
 重载失败保留调用方当前 `SequenceResource` 中的旧快照，旧 `CompiledSequence`
 拷贝在成功重载或缓存驱逐后仍有效。`reloadSequenceResource(path)` 用于清除管理器
 的缓存/失败状态并重试散文件。此接线不自动预加载依赖的动画或音频资源，也不
-提供 `.seq` 的 Cook/Pak 生产准入或构建依赖枚举。
+提供 `.seq` 的 Cook/Pak 生产准入。构建侧可先用
+`buildSequenceDependencyManifest(sequence, assetsRoot, output)` 核对场景、动画和音频
+引用均位于 Assets 内的普通文件，并得到去重路径、大小、内容指纹及整体签名。
+发布前应重算以识别计划后的修改；这一步本身不做 Cook/Pak 打包。
 
 ## Extended diagnostic observations (2026-10-15)
 
