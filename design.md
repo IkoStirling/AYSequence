@@ -199,6 +199,16 @@ generation 失效，调用者在每个事件回调前检查。S3 增加可选骨
 - Core 和 SceneSession 不取得主相机/音频设备所有权。游戏呈现层解析镜头 binding、
   切换主视图、预加载音频并提交播放；失败与去重策略由该层定义。现有 AYEditor
   页面未增加新轨道控件，`SequenceAuthoring` 的值编辑/时间移动/删除已支持新结构。
+
+### S5 可选资源管理器接线（2026-10-25）
+
+`AYSequence::Resources` 仅在 AYResource 与 AssetIO 同时可用时建立。
+`registerSequenceResourceLoader` 显式注册 `.seq` 和旧 `.ayseq` 路径类型；
+`SequenceResource` 从 loose 文件或显式 JSON 字节解析、验证并编译不可变快照。
+加载/重载候选完全成功后才替换已有资源内部快照，旧快照由使用者共享拥有。
+ResourceManager 可缓存并按普通规则驱逐该 CPU 资源；失败加载返回空。
+接线不改变 `authoring.scene-sequence` 的发布级别，没有自动资源依赖枚举、
+Cook/Pak 转换、音频预加载或主相机执行适配。
 - 页面提供绑定、三类 Transform 轨道、事件、Clip 片段、时间和数值编辑；空的
   value/animation track 不合法，删最后 item 时删轨道。被引用 binding 删除拒绝。
 - DopeSheet 复用稳定 ID/选择；动画 section 独立 block 视图，中间移动、两端裁剪。

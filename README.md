@@ -219,6 +219,17 @@ Transform 轨道制作。求值输出当前切点的 `cutId`、`binding` 和作�
 `SequenceAuthoring::edit` 及移动/删除辅助函数支持这两类作者数据；当前 AYEditor
 序列页面尚无专门的镜头/音频轨道控件，可由外部作者工具通过同一数据模型生成。
 
+### 可选 ResourceManager 加载
+
+根构建同时启用 AYResource 与 Sequence AssetIO 时，链接
+`AYSequence::Resources`，调用 `registerSequenceResourceLoader()` 后可使用
+`ResourceManager::load<SequenceResource>(path)` 获取缓存的已验证编译快照。
+注册 `.seq` 与旧 `.ayseq` 只读别名。加载器也可对传入的 JSON 字节执行相同校验；
+重载失败保留调用方当前 `SequenceResource` 中的旧快照，旧 `CompiledSequence`
+拷贝在成功重载或缓存驱逐后仍有效。`reloadSequenceResource(path)` 用于清除管理器
+的缓存/失败状态并重试散文件。此接线不自动预加载依赖的动画或音频资源，也不
+提供 `.seq` 的 Cook/Pak 生产准入或构建依赖枚举。
+
 ## Extended diagnostic observations (2026-10-15)
 
 SceneSequenceSession::debugSnapshots enumerates only the requested World on its owner thread (64 sessions/256 bindings each) and copies playback, Transform ownership and active section observations. Optional independent event history defaults off and caps128/session; it records actual crossed events, then marks delivery after successful gameplay callbacks. Observation never advances playback or drains/replays SceneFrame. Clear and disabling only remove diagnostic events; the original sink, generation and once-only batch rules remain authoritative.
