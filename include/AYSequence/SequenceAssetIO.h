@@ -3,8 +3,9 @@
 #include <string_view>
 
 namespace ayt::sequence {
-/// JSON schema 1/2, type authoring.scene-sequence. Schema 2 adds scenePath and
-/// exact entityName locators; legacy schema 1 remains readable. Strict fields and duplicate-key
+/// JSON schema 1/2/3, type authoring.scene-sequence. Schema 2 adds scenePath and
+/// exact entityName locators; schema 3 adds camera cuts and audio cues.
+/// Legacy schemas remain readable. Strict fields and duplicate-key
 /// rejection; 16 MiB / 32-depth limit. Failure leaves output unchanged.
 bool decodeSequence(std::string_view bytes, Sequence& output, Diagnostic* error = nullptr);
 /// Validate and produce canonical JSON; failure leaves output unchanged.

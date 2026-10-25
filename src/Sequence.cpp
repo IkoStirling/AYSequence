@@ -72,7 +72,9 @@ bool validate(const Sequence& s, Diagnostic* e) {
     }
     if (!std::isfinite(s.duration) || s.duration <= 0 || s.duration > 86400) return fail(e, "duration", "Expected 0 < duration <= 86400 seconds");
     if (!std::isfinite(s.displayFps) || s.displayFps < 1 || s.displayFps > 240) return fail(e, "displayFps", "Expected display rate in [1,240]");
-    if (s.bindings.size() > 1024 || s.transforms.size() + s.animations.size() + s.eventTracks.size() > 4096) return fail(e, "tracks", "Sequence exceeds binding/track limits");
+    if (s.bindings.size() > 1024 || s.transforms.size() + s.animations.size() + s.eventTracks.size() > 4096
+        || s.cameraCuts.size() > 1024 || s.audioCues.size() > 10000)
+        return fail(e, "tracks", "Sequence exceeds binding/track/cue limits");
     std::unordered_set<std::string> ids{s.id}, bindings, channels;
     auto addId = [&](const std::string& id) { return idValid(id) && ids.insert(id).second; };
     for (const auto& b : s.bindings) {
@@ -124,6 +126,28 @@ bool validate(const Sequence& s, Diagnostic* e) {
             previous = ev.time;
         }
     }
+    double previousCut = -1;
+    for (const auto& cut : s.cameraCuts) {
+        if (!addId(cut.id) || !bindings.contains(cut.binding)
+            || !timeValid(cut.time, s.duration) || cut.time <= previousCut
+            || !std::isfinite(cut.blendSeconds) || cut.blendSeconds < 0
+            || cut.blendSeconds > s.duration)
+            return fail(e, cut.id, "Invalid camera cut ID, binding, time or blend");
+        previousCut = cut.time;
+    }
+    double previousAudio = -1;
+    for (const auto& cue : s.audioCues) {
+        const auto matched = ayt::asset_format::matchPath(cue.source);
+        if (!addId(cue.id) || !timeValid(cue.time, s.duration)
+            || cue.time < previousAudio || !matched
+            || matched->descriptor->id != ayt::asset_format::Id::Audio
+            || !pathValid(cue.source, matched->suffix)
+            || !std::isfinite(cue.gain) || cue.gain < 0 || cue.gain > 4)
+            return fail(e, cue.id, "Invalid audio cue ID, time, asset or gain");
+        previousAudio = cue.time;
+    }
+    if (eventCount + s.audioCues.size() > 10000)
+        return fail(e, "cues", "Too many timed events and audio cues");
     return true;
 }
 CompiledSequence::CompiledSequence(Sequence s) : _data(std::move(s)) {
@@ -144,6 +168,12 @@ bool CompiledSequence::evaluate(double time, Evaluation& output, Diagnostic* e) 
         if (right == tr.sections.begin()) continue;
         const auto& sec = *(right - 1);
         if (time < sec.end || (time == _data.duration && sec.end == time)) next.animations.push_back({tr.binding, sec.id, sec.source, std::min(sec.sourceDuration, sec.sourceOffset + (time - sec.start) * sec.speed)});
+    }
+    const auto rightCut = std::upper_bound(_data.cameraCuts.begin(), _data.cameraCuts.end(),
+        time, [](double t, const CameraCut& cut) { return t < cut.time; });
+    if (rightCut != _data.cameraCuts.begin()) {
+        const auto& cut = *(rightCut - 1);
+        next.camera = CameraSample{cut.id, cut.binding, cut.blendSeconds};
     }
     output = std::move(next); if (e) *e = {}; return true;
 }
@@ -178,6 +208,9 @@ bool SequencePlayer::advance(double dt, PlaybackFrame& out, Diagnostic* e) {
         const auto& events = _sequence->orderedEvents();
         auto begin = _includeOrigin ? std::lower_bound(events.begin(), events.end(), _position, [](const Event& ev, double t) { return ev.time < t; }) : std::upper_bound(events.begin(), events.end(), _position, [](double t, const Event& ev) { return t < ev.time; });
         for (auto it = begin; it != events.end() && it->time <= nextTime; ++it) next.events.push_back(*it);
+        const auto& audio = _sequence->data().audioCues;
+        auto audioBegin = _includeOrigin ? std::lower_bound(audio.begin(), audio.end(), _position, [](const AudioCue& cue, double t) { return cue.time < t; }) : std::upper_bound(audio.begin(), audio.end(), _position, [](double t, const AudioCue& cue) { return t < cue.time; });
+        for (auto it = audioBegin; it != audio.end() && it->time <= nextTime; ++it) next.audioCues.push_back(*it);
         _includeOrigin = false;
         if (nextTime == _sequence->data().duration) { _state = PlaybackState::Completed; next.completed = true; }
     }

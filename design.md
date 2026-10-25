@@ -59,7 +59,7 @@ AYAnimation 子系统。第一版不是完整影视 Sequencer，也不支持任�
 | 目标（未实现项标注 Planned） | 职责 | 依赖约束 |
 |---|---|---|
 | AYSequence / AYSequence::Core | 值对象、校验、时间映射、求值、播放器状态、事件穿越 | 标准库与必要数学基础；无 World/UI/设备依赖 |
-| AYSequenceAssetIO | schema 1/2 严格 loose 读写；Resource 注册/依赖枚举另待后续 | Core、AYIO 与 JSON |
+| AYSequenceAssetIO | schema 1/2/3 严格 loose 读写；Resource 注册/依赖枚举另待后续 | Core、AYIO 与 JSON |
 | AYSequenceEntityIntegration | 绑定解析、Transform 应用、生命周期/控制权、可选 Host 调度 | Core、AYEntityCore、AYGameLoop；不链接 AYEntity 完整 facade |
 | AYSequenceAnimationIntegration | 既有 Clip 快照、时间采样、骨骼姿势 lease/恢复 | Entity integration、AYEntityAnimationIntegration、AYAnimation、AYResource；无 Renderer |
 | AYSequenceEditorCore | 不可变快照、原子编辑、验证、稳定 ID | Core；无 AYEditor/AYUI/World/文件/内部历史 |
@@ -173,7 +173,7 @@ generation 失效，调用者在每个事件回调前检查。S3 增加可选骨
 - dispatchSequenceEvents 按值持有 session/frame/sink；owner/batch/generation 防跨会话、
   重放、过期、嵌套派发。每个回调前预检；stop/seek/rebind/销毁/World teardown 取消
   余下事件。异常捕获后停止，返回已进入回调数；Host tick 只排队，取出后再显式派发。
-- 仍无 `.seq` Resource loader、cook/pak、相机/音频、混合/Root Motion；Editor 页面由 S4 提供。
+- 仍无 `.seq` Resource loader、cook/pak、相机/音频设备执行适配、混合/Root Motion；Editor 页面由 S4 提供。
 - 骨架兼容检查是合法目标拓扑和轨道骨名/类型，不是源骨架 GUID/语义证明；当前
   `.ayanm` 不携带源骨架拓扑。宿主须提供已针对目标骨架制作/烘焙的 Clip。
 
@@ -186,6 +186,19 @@ generation 失效，调用者在每个事件回调前检查。S3 增加可选骨
 - schema 2 必需 scenePath 和 binding.entityName，仍拒绝未知字段；兼容 schema 1。
   无 locator 写 schema 1，有 locator 写 schema 2。路径相对 Assets，name 精确唯一，
   最多 256 字节且不含控制符。不是 GUID；重名/缺失/改名拒绝，不猜第一个对象。
+
+### S5 镜头与音频时间轨道（2026-10-25）
+
+- schema 3 在 schema 2 上增加 `cameraCuts` 与 `audioCues`。旧 schema 1/2
+  保持原严格字段与加载语义；含新轨道的文档写 schema 3。镜头切点按严格递增时间
+  选择已声明 binding，音频提示按非递减时间携带便携 `.aud` 资源路径和有限增益。
+- `CompiledSequence::evaluate` 在时间点输出最后生效的镜头切点；切点 ID 供宿主
+  检测变化并避免每帧重启过渡。播放器只在正向跨越时输出音频提示；seek/暂停
+  无副作用。原事件与音频在 `dispatchSequenceCues` 中按时间合并，同时间点先事件。
+  整批仍受 owner、generation、batch 和 World 预检保护，只可派发一次。
+- Core 和 SceneSession 不取得主相机/音频设备所有权。游戏呈现层解析镜头 binding、
+  切换主视图、预加载音频并提交播放；失败与去重策略由该层定义。现有 AYEditor
+  页面未增加新轨道控件，`SequenceAuthoring` 的值编辑/时间移动/删除已支持新结构。
 - 页面提供绑定、三类 Transform 轨道、事件、Clip 片段、时间和数值编辑；空的
   value/animation track 不合法，删最后 item 时删轨道。被引用 binding 删除拒绝。
 - DopeSheet 复用稳定 ID/选择；动画 section 独立 block 视图，中间移动、两端裁剪。

@@ -14,6 +14,14 @@ struct SceneFrame {
 };
 class SceneSequenceSession;
 using SequenceEventSink = std::function<void(const Event&)>;
+using SequenceAudioSink = std::function<void(const AudioCue&)>;
+/// Dispatch a mixed event/audio batch once in time order (events first at a
+/// tie). The caller resolves audio assets and camera selection; callbacks run
+/// after Transform writes and each is guarded against stale World/session.
+bool dispatchSequenceCues(std::shared_ptr<SceneSequenceSession> session,
+    SceneFrame frame, SequenceEventSink events, SequenceAudioSink audio,
+    std::size_t& deliveredEvents, std::size_t& deliveredAudio,
+    Diagnostic* error = nullptr);
 /// Consume an owned batch once, holding the session alive across callbacks.
 /// Reject stale/foreign/replayed/nested batches. Recheck bindings and generation
 /// before each callback; stop/seek/rebind/deletion/World teardown cancel the rest.
@@ -77,5 +85,8 @@ private:
     friend class SequenceSubSystem;
     friend bool dispatchSequenceEvents(std::shared_ptr<SceneSequenceSession>, SceneFrame,
                                       SequenceEventSink, std::size_t&, Diagnostic*);
+    friend bool dispatchSequenceCues(std::shared_ptr<SceneSequenceSession>, SceneFrame,
+                                    SequenceEventSink, SequenceAudioSink,
+                                    std::size_t&, std::size_t&, Diagnostic*);
 };
 } // namespace ayt::sequence

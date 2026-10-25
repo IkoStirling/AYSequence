@@ -58,6 +58,36 @@ TEST_CASE(two_objects_scrub_and_stop_restore_original_state) {
     CHECK_TRUE(s->seek(2,out)); CHECK(f.left->getComponent<Transform>()->position.x==4); CHECK(f.right->getComponent<Transform>()->scale.y==2); CHECK(std::abs(f.right->getComponent<Transform>()->rotation.y-std::sqrt(0.5f))<1e-5f); CHECK(out.playback.events.empty());
     CHECK_TRUE(s->seek(1,out)); s->stop(); CHECK(f.left->getComponent<Transform>()->position.x==10); CHECK(f.right->getComponent<Transform>()->scale.x==5); CHECK_FALSE(s->isCurrent(out.generation));
 }
+TEST_CASE(camera_and_audio_cues_are_owned_and_dispatched_once) {
+    Fixture f;
+    auto authored = model();
+    authored.cameraCuts = {{"wide", "left", 0, 0},
+                           {"close", "right", 2, 0.25}};
+    authored.audioCues = {{"opening", "audio/open.aud", 0, 1},
+                          {"impact", "audio/impact.aud", 2, 0.8}};
+    authored.eventTracks[0].events.insert(authored.eventTracks[0].events.begin() + 1,
+        {"beat", 2, "beat", ""});
+    auto session = std::make_shared<SceneSequenceSession>();
+    CHECK_TRUE(session->bind(f.scene.world(),
+        CompiledSequence::compile(authored), f.ids()));
+    CHECK_TRUE(session->play());
+    SceneFrame frame;
+    CHECK_TRUE(session->advance(2, frame));
+    CHECK(frame.playback.evaluation.camera);
+    CHECK(frame.playback.evaluation.camera->binding == "right");
+    std::size_t events = 0, audio = 0;
+    CHECK_FALSE(dispatchSequenceEvents(session, frame, [](const Event&){}, events));
+    std::vector<std::string> order;
+    CHECK_TRUE(dispatchSequenceCues(session, frame,
+        [&](const Event& event) { order.push_back(event.id); },
+        [&](const AudioCue& cue) { order.push_back(cue.id); },
+        events, audio));
+    CHECK(events == 2 && audio == 2);
+    CHECK(order == std::vector<std::string>({"start", "opening", "beat", "impact"}));
+    CHECK_FALSE(dispatchSequenceCues(session, frame,
+        [](const Event&){}, [](const AudioCue&){}, events, audio));
+    CHECK(events == 0 && audio == 0);
+}
 TEST_CASE(once_completion_restores_baseline_and_returns_final_output) {
     Fixture f; auto s=f.session(); CHECK_TRUE(s->play()); SceneFrame out;
     CHECK_TRUE(s->advance(4,out)); CHECK_TRUE(out.playback.completed); CHECK(out.playback.events.size()==2); CHECK(out.playback.evaluation.transforms[0].value[0]==8);

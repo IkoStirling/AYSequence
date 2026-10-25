@@ -35,6 +35,9 @@ private:
     bool _initialized = false;
     friend bool dispatchSequenceEvents(std::shared_ptr<SceneSequenceSession>, SceneFrame,
                                       SequenceEventSink, std::size_t&, Diagnostic*);
+    friend bool dispatchSequenceCues(std::shared_ptr<SceneSequenceSession>, SceneFrame,
+                                    SequenceEventSink, SequenceAudioSink,
+                                    std::size_t&, std::size_t&, Diagnostic*);
 };
 
 /// Explicit optional startup node AYSequence.Runtime, requires AYEntity.Runtime.

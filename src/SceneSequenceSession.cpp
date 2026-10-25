@@ -212,31 +212,62 @@ void SceneSequenceSession::stamp(SceneFrame& out) {
 }
 bool dispatchSequenceEvents(std::shared_ptr<SceneSequenceSession> session, SceneFrame frame,
                             SequenceEventSink sink, std::size_t& delivered, Diagnostic* e) {
-    delivered = 0;
-    auto fail = [&](const char* message) { if (e) *e = {"events",message}; return false; };
-    if (!session || !sink) return fail("Expected live session and event sink");
+    std::size_t audioDelivered = 0;
+    if (!sink) { delivered = 0; if (e) *e = {"events", "Expected event sink"}; return false; }
+    return dispatchSequenceCues(std::move(session), std::move(frame),
+        std::move(sink), {}, delivered, audioDelivered, e);
+}
+bool dispatchSequenceCues(std::shared_ptr<SceneSequenceSession> session,
+                          SceneFrame frame, SequenceEventSink events,
+                          SequenceAudioSink audio, std::size_t& deliveredEvents,
+                          std::size_t& deliveredAudio, Diagnostic* e) {
+    deliveredEvents = 0;
+    deliveredAudio = 0;
+    auto fail = [&](const char* message) { if (e) *e = {"cues",message}; return false; };
+    if (!session || (!events && !frame.playback.events.empty())
+        || (!audio && !frame.playback.audioCues.empty()))
+        return fail("Expected live session and sinks for contained cues");
     auto& p = *session->_impl;
     if (p.dispatching || frame.owner != p.owner || !frame.batch || frame.batch > p.batch || frame.batch <= p.dispatched
         || !session->isCurrent(frame.generation)) return fail("Stale, foreign, replayed or nested event batch");
     p.dispatched = frame.batch; p.dispatching = true;
     struct Guard { bool& flag; ~Guard() { flag = false; } } guard{p.dispatching};
-    for (const auto& event : frame.playback.events) {
+    const auto beforeCue = [&]() {
         if (p.host) {
             // Hold the provider callable across potential host changes.
-            auto provider=p.host->_provider;
             World* current=nullptr;
-            try { current=provider(); }
-            catch (...) { session->stop(); return fail("World provider threw; events canceled"); }
+            try { auto provider=p.host->_provider; current=provider(); }
+            catch (...) { session->stop(); return fail("World provider threw; cues canceled"); }
             if (p.world!=current) {
                 session->stop(); p.world=nullptr; p.bindings.clear();
-                return fail("Active World changed; remaining events canceled and explicit rebind required");
+                return fail("Active World changed; remaining cues canceled and explicit rebind required");
             }
         }
-        if (!session->isCurrent(frame.generation) || !session->check(e)) return fail("Playback or binding changed; remaining events canceled");
-        try { ++delivered; sink(event);
-            for(auto& observed:p.debugEvents)if(observed.batch==frame.batch && observed.generation==frame.generation && observed.event.id==event.id)observed.delivered=true;
+        if (!session->isCurrent(frame.generation) || !session->check(e))
+            return fail("Playback or binding changed; remaining cues canceled");
+        return true;
+    };
+    std::size_t eventIndex = 0, audioIndex = 0;
+    while (eventIndex < frame.playback.events.size()
+           || audioIndex < frame.playback.audioCues.size()) {
+        if (!beforeCue()) return false;
+        const bool useEvent = eventIndex < frame.playback.events.size()
+            && (audioIndex == frame.playback.audioCues.size()
+                || frame.playback.events[eventIndex].time
+                    <= frame.playback.audioCues[audioIndex].time);
+        try {
+            if (useEvent) {
+                const auto& event = frame.playback.events[eventIndex++];
+                ++deliveredEvents;
+                events(event);
+                for(auto& observed:p.debugEvents)if(observed.batch==frame.batch && observed.generation==frame.generation && observed.event.id==event.id)observed.delivered=true;
+            } else {
+                const auto& cue = frame.playback.audioCues[audioIndex++];
+                ++deliveredAudio;
+                audio(cue);
+            }
         }
-        catch (...) { session->stop(); return fail("Event callback threw; playback stopped"); }
+        catch (...) { session->stop(); return fail("Cue callback threw; playback stopped"); }
     }
     if (e) *e = {};
     return true;

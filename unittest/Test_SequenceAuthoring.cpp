@@ -88,6 +88,23 @@ TEST_CASE(group_move_mixes_transform_keys_and_events_atomically) {
     CHECK_FALSE(m.edit([](Sequence &s) { return moveSequenceItems(s, {"key0", "key0"}, 1); }));
     CHECK(m.snapshot() == before);
 }
+TEST_CASE(authoring_moves_and_removes_camera_audio_cues) {
+    SequenceAuthoring model;
+    auto source = authored();
+    source.cameraCuts = {{"cut0", "actor", 0.5, 0}};
+    source.audioCues = {{"cue0", "audio/step.aud", 1.5, 1}};
+    CHECK_TRUE(model.replace(source));
+    CHECK_TRUE(model.edit([](Sequence& s) {
+        return moveSequenceItems(s, {"cut0", "cue0"}, 0.5);
+    }));
+    CHECK(model.snapshot()->data().cameraCuts[0].time == 1);
+    CHECK(model.snapshot()->data().audioCues[0].time == 2);
+    CHECK_TRUE(model.edit([](Sequence& s) {
+        return removeSequenceItems(s, {"cut0", "cue0"});
+    }));
+    CHECK(model.snapshot()->data().cameraCuts.empty());
+    CHECK(model.snapshot()->data().audioCues.empty());
+}
 TEST_CASE(section_move_preserves_duration_offset_and_rejects_overlap) {
     SequenceAuthoring m;
     m.replace(authored());

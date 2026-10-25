@@ -2,6 +2,7 @@
 
 #include <array>
 #include <memory>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -25,6 +26,19 @@ struct AnimationSection {
 struct AnimationTrack { std::string id, binding; std::vector<AnimationSection> sections; bool operator==(const AnimationTrack&) const = default; };
 struct Event { std::string id; double time = 0; std::string name, payload; bool operator==(const Event&) const = default; };
 struct EventTrack { std::string id; std::vector<Event> events; bool operator==(const EventTrack&) const = default; };
+/// Select one declared camera binding at the given time. The camera's pose
+/// may be authored with ordinary TransformTracks on that binding.
+struct CameraCut {
+    std::string id, binding;
+    double time = 0, blendSeconds = 0;
+    bool operator==(const CameraCut&) const = default;
+};
+/// Start an audio asset at its sequence time; the game owns actual playback.
+struct AudioCue {
+    std::string id, source;
+    double time = 0, gain = 1;
+    bool operator==(const AudioCue&) const = default;
+};
 struct Sequence {
     std::string id;
     double duration = 1, displayFps = 30;
@@ -32,6 +46,8 @@ struct Sequence {
     std::vector<TransformTrack> transforms;
     std::vector<AnimationTrack> animations;
     std::vector<EventTrack> eventTracks;
+    std::vector<CameraCut> cameraCuts;
+    std::vector<AudioCue> audioCues;
     // Optional schema 2 authoring locator, relative to the project's Assets root.
     // Exact unique entity names are not persistent GUIDs; rename requires rebinding.
     std::string scenePath;
@@ -39,9 +55,11 @@ struct Sequence {
 };
 struct TransformSample { std::string binding; Channel channel; Value value; };
 struct AnimationSample { std::string binding, section, source; double sourceTime = 0; };
+struct CameraSample { std::string cutId, binding; double blendSeconds = 0; };
 struct Evaluation {
     std::vector<TransformSample> transforms;
     std::vector<AnimationSample> animations;
+    std::optional<CameraSample> camera;
 };
 struct Diagnostic { std::string location, message; };
 
@@ -66,7 +84,12 @@ private:
 };
 
 enum class PlaybackState { Stopped, Playing, Paused, Completed };
-struct PlaybackFrame { Evaluation evaluation; std::vector<Event> events; bool completed = false; };
+struct PlaybackFrame {
+    Evaluation evaluation;
+    std::vector<Event> events;
+    std::vector<AudioCue> audioCues;
+    bool completed = false;
+};
 
 /// Main-thread value-only Once player. No World access, callbacks or global clock.
 /// The owner must advance it exactly once. Outputs own their event data.

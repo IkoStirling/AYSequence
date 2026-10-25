@@ -90,11 +90,64 @@ TEST_CASE(terminal_seek_restart_and_partial_key_ranges_are_explicit) {
     SequencePlayer p; p.bind(s); PlaybackFrame out; CHECK_TRUE(p.seek(4,out)); CHECK(out.events.empty()); p.play(); CHECK(p.position() == 0); p.advance(4,out); CHECK_TRUE(out.completed);
     CHECK_TRUE(p.seek(2,out)); CHECK(p.state() == PlaybackState::Paused); p.play(); p.advance(1,out); CHECK(out.events.empty());
 }
+TEST_CASE(camera_cuts_and_audio_cues_share_sequence_clock) {
+    auto f = fixture();
+    f.cameraCuts = {{"cut-left", "left", 0, 0},
+                    {"cut-right", "right", 2, 0.5}};
+    f.audioCues = {{"audio-start", "audio/start.aud", 0, 1},
+                   {"audio-hit", "audio/hit.aud", 2, 0.75}};
+    auto compiled = CompiledSequence::compile(f);
+    CHECK_TRUE(compiled != nullptr);
+    Evaluation evaluated;
+    CHECK_TRUE(compiled->evaluate(1.9, evaluated));
+    CHECK(evaluated.camera && evaluated.camera->binding == "left");
+    CHECK_TRUE(compiled->evaluate(2, evaluated));
+    CHECK(evaluated.camera && evaluated.camera->binding == "right");
+    CHECK(evaluated.camera->blendSeconds == 0.5);
+    SequencePlayer player; player.bind(compiled); CHECK_TRUE(player.play());
+    PlaybackFrame frame;
+    CHECK_TRUE(player.advance(0, frame)); CHECK(frame.audioCues.empty());
+    CHECK_TRUE(player.advance(2, frame));
+    CHECK(frame.audioCues.size() == 2);
+    CHECK(frame.audioCues[0].id == "audio-start");
+    CHECK(frame.audioCues[1].id == "audio-hit");
+    CHECK_TRUE(player.seek(0, frame)); CHECK(frame.audioCues.empty());
+    CHECK_TRUE(player.advance(0.1, frame)); CHECK(frame.audioCues.empty());
+    player.stop(); CHECK_TRUE(player.play());
+    CHECK_TRUE(player.advance(0.1, frame));
+    CHECK(frame.audioCues.size() == 1);
+}
+TEST_CASE(camera_audio_validation_rejects_bad_authored_content) {
+    auto f = fixture(); f.cameraCuts = {{"cut", "missing", 0, 0}};
+    CHECK_FALSE(validate(f));
+    f = fixture(); f.cameraCuts = {{"a", "left", 1, 0}, {"b", "right", 1, 0}};
+    CHECK_FALSE(validate(f));
+    f = fixture(); f.audioCues = {{"cue", "../bad.aud", 1, 1}};
+    CHECK_FALSE(validate(f));
+    f = fixture(); f.audioCues = {{"cue", "audio/ok.aud", 1, -1}};
+    CHECK_FALSE(validate(f));
+    f = fixture(); f.cameraCuts = {{"ev0", "left", 0, 0}};
+    CHECK_FALSE(validate(f));
+}
 TEST_SUITE_END
 
 TEST_SUITE(SequenceAssetTests)
 TEST_CASE(json_round_trip_preserves_all_track_types) {
     auto f = fixture(); std::string bytes; CHECK_TRUE(encodeSequence(f,bytes)); Sequence copy; CHECK_TRUE(decodeSequence(bytes,copy)); std::string again; CHECK_TRUE(encodeSequence(copy,again)); CHECK(bytes == again);
+}
+TEST_CASE(schema_three_round_trip_preserves_camera_and_audio) {
+    auto f = fixture();
+    f.cameraCuts = {{"cut", "left", 0.5, 0.25}};
+    f.audioCues = {{"cue", "audio/music.aud", 1.5, 0.7}};
+    std::string bytes;
+    CHECK_TRUE(encodeSequence(f, bytes));
+    CHECK(bytes.find("\"version\": 3") != std::string::npos);
+    Sequence decoded;
+    CHECK_TRUE(decodeSequence(bytes, decoded));
+    CHECK(decoded == f);
+    std::string repeated;
+    CHECK_TRUE(encodeSequence(decoded, repeated));
+    CHECK(bytes == repeated);
 }
 TEST_CASE(bad_json_version_duplicate_and_unknown_fields_preserve_output) {
     Sequence out = fixture(); Diagnostic e;

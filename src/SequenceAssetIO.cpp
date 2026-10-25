@@ -31,13 +31,18 @@ bool decodeSequence(std::string_view bytes, Sequence& output, Diagnostic* e) {
             if (event == Json::parse_event_t::object_end) objectKeys.pop_back();
             return true;
         });
-        if (j.at("type") != "authoring.scene-sequence" || !j.at("version").is_number_integer() || (j.at("version") != 1 && j.at("version") != 2)) return fail(e, "Unsupported sequence type/version");
-        const bool authoring = j.at("version") == 2;
-        if (authoring) fields(j, {"type", "version", "id", "duration", "displayFps", "bindings", "transforms", "animations", "eventTracks", "scenePath"});
+        if (j.at("type") != "authoring.scene-sequence" || !j.at("version").is_number_integer()
+            || (j.at("version") != 1 && j.at("version") != 2 && j.at("version") != 3))
+            return fail(e, "Unsupported sequence type/version");
+        const bool cues = j.at("version") == 3;
+        const bool authoring = j.at("version") == 2 || cues;
+        if (cues) fields(j, {"type", "version", "id", "duration", "displayFps", "bindings", "transforms", "animations", "eventTracks", "scenePath", "cameraCuts", "audioCues"});
+        else if (authoring) fields(j, {"type", "version", "id", "duration", "displayFps", "bindings", "transforms", "animations", "eventTracks", "scenePath"});
         else fields(j, {"type", "version", "id", "duration", "displayFps", "bindings", "transforms", "animations", "eventTracks"});
         Sequence s; s.id = j.at("id").get<std::string>(); s.duration = number(j.at("duration")); s.displayFps = number(j.at("displayFps"));
         if (authoring) s.scenePath = j.at("scenePath").get<std::string>();
         arrayLimit(j.at("bindings"), 1024); arrayLimit(j.at("transforms"), 4096); arrayLimit(j.at("animations"), 4096); arrayLimit(j.at("eventTracks"), 4096);
+        if (cues) { arrayLimit(j.at("cameraCuts"), 1024); arrayLimit(j.at("audioCues"), 10000); }
         for (const auto& b : j.at("bindings")) {
             if (authoring) fields(b, {"id", "entityName"}); else fields(b, {"id"});
             s.bindings.push_back({b.at("id").get<std::string>(), authoring ? b.at("entityName").get<std::string>() : std::string{}});
@@ -71,6 +76,18 @@ bool decodeSequence(std::string_view bytes, Sequence& output, Diagnostic* e) {
             for (const auto& v : tr.at("events")) { fields(v, {"id", "time", "name", "payload"}); t.events.push_back({v.at("id"), number(v.at("time")), v.at("name"), v.at("payload")}); }
             s.eventTracks.push_back(std::move(t));
         }
+        if (cues) {
+            for (const auto& cut : j.at("cameraCuts")) {
+                fields(cut, {"id", "binding", "time", "blendSeconds"});
+                s.cameraCuts.push_back({cut.at("id"), cut.at("binding"),
+                    number(cut.at("time")), number(cut.at("blendSeconds"))});
+            }
+            for (const auto& cue : j.at("audioCues")) {
+                fields(cue, {"id", "source", "time", "gain"});
+                s.audioCues.push_back({cue.at("id"), cue.at("source"),
+                    number(cue.at("time")), number(cue.at("gain"))});
+            }
+        }
         if (!validate(s, e)) return false;
         output = std::move(s); return true;
     } catch (const std::exception& ex) { return fail(e, ex.what()); }
@@ -79,8 +96,9 @@ bool encodeSequence(const Sequence& s, std::string& output, Diagnostic* e) {
     if (!validate(s, e)) return false;
     try {
         Json j = {{"type", "authoring.scene-sequence"}, {"version", 1}, {"id", s.id}, {"duration", s.duration}, {"displayFps", s.displayFps}, {"bindings", Json::array()}, {"transforms", Json::array()}, {"animations", Json::array()}, {"eventTracks", Json::array()}};
-        const bool authoring = !s.scenePath.empty() || std::any_of(s.bindings.begin(), s.bindings.end(), [](const Binding& b) { return !b.entityName.empty(); });
-        if (authoring) { j["version"] = 2; j["scenePath"] = s.scenePath; }
+        const bool cues = !s.cameraCuts.empty() || !s.audioCues.empty();
+        const bool authoring = cues || !s.scenePath.empty() || std::any_of(s.bindings.begin(), s.bindings.end(), [](const Binding& b) { return !b.entityName.empty(); });
+        if (authoring) { j["version"] = cues ? 3 : 2; j["scenePath"] = s.scenePath; }
         for (const auto& b : s.bindings) {
             Json binding = {{"id", b.id}};
             if (authoring) binding["entityName"] = b.entityName;
@@ -99,6 +117,16 @@ bool encodeSequence(const Sequence& s, std::string& output, Diagnostic* e) {
         for (const auto& tr : s.eventTracks) {
             Json events = Json::array(); for (const auto& v : tr.events) events.push_back({{"id", v.id}, {"time", v.time}, {"name", v.name}, {"payload", v.payload}});
             j["eventTracks"].push_back({{"id", tr.id}, {"events", events}});
+        }
+        if (cues) {
+            j["cameraCuts"] = Json::array();
+            for (const auto& cut : s.cameraCuts)
+                j["cameraCuts"].push_back({{"id", cut.id}, {"binding", cut.binding},
+                    {"time", cut.time}, {"blendSeconds", cut.blendSeconds}});
+            j["audioCues"] = Json::array();
+            for (const auto& cue : s.audioCues)
+                j["audioCues"].push_back({{"id", cue.id}, {"source", cue.source},
+                    {"time", cue.time}, {"gain", cue.gain}});
         }
         std::string bytes = j.dump(2);
         if (bytes.size() > maxBytes) return fail(e, "Encoded sequence exceeds 16 MiB");

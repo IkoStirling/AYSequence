@@ -204,6 +204,21 @@ DopeSheet 拖动关键帧时间，右侧数值字段编辑分量/事件；sectio
 未设置 scenePath 时允许纯数值播放。设置定位后写 schema 2，旧 schema 1 可读。
 `AYSequence::EditorCore` 只链接 Core，不依赖 UI/World，历史由宿主提供。
 
+### 镜头切点与音频提示
+
+`Sequence::cameraCuts` 选择已声明的绑定；对应摄像机的位置/旋转仍可用原有
+Transform 轨道制作。求值输出当前切点的 `cutId`、`binding` 和作者设定的
+`blendSeconds`，由游戏相机呈现层按切点 ID 的变化执行切镜或过渡；求值本身
+不修改主相机状态。`audioCues` 记录便携 `.aud` 路径、时间和增益，播放越过
+时间点时在 owned `PlaybackFrame` 中出现。seek、暂停和零时间步不发声。
+`dispatchSequenceCues` 将事件和音频提示按时间派发，同时间点先事件后音频，
+保留 SceneSession 的一次性批次与 World 生命周期校验。音频资源解析和实际播放
+仍由游戏/AYAudio 适配层执行；宿主必须在当帧消费并处理重试策略。
+
+加入任一新轨道时 `.seq` 写为 schema 3，仍可读 schema 1/2。通用
+`SequenceAuthoring::edit` 及移动/删除辅助函数支持这两类作者数据；当前 AYEditor
+序列页面尚无专门的镜头/音频轨道控件，可由外部作者工具通过同一数据模型生成。
+
 ## Extended diagnostic observations (2026-10-15)
 
 SceneSequenceSession::debugSnapshots enumerates only the requested World on its owner thread (64 sessions/256 bindings each) and copies playback, Transform ownership and active section observations. Optional independent event history defaults off and caps128/session; it records actual crossed events, then marks delivery after successful gameplay callbacks. Observation never advances playback or drains/replays SceneFrame. Clear and disabling only remove diagnostic events; the original sink, generation and once-only batch rules remain authoritative.

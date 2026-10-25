@@ -15,6 +15,10 @@ void sortRows(Sequence &s) {
     for (auto &t : s.eventTracks)
         std::stable_sort(t.events.begin(), t.events.end(),
                          [](const auto &a, const auto &b) { return a.time < b.time; });
+    std::stable_sort(s.cameraCuts.begin(), s.cameraCuts.end(),
+                     [](const auto &a, const auto &b) { return a.time < b.time; });
+    std::stable_sort(s.audioCues.begin(), s.audioCues.end(),
+                     [](const auto &a, const auto &b) { return a.time < b.time; });
 }
 std::unordered_set<std::string> allIds(const Sequence &s) {
     std::unordered_set<std::string> ids{s.id};
@@ -35,6 +39,8 @@ std::unordered_set<std::string> allIds(const Sequence &s) {
         for (auto &k : t.events)
             ids.insert(k.id);
     }
+    for (const auto &cut : s.cameraCuts) ids.insert(cut.id);
+    for (const auto &cue : s.audioCues) ids.insert(cue.id);
     return ids;
 }
 } // namespace
@@ -120,6 +126,10 @@ bool moveSequenceItems(Sequence &s, const std::vector<std::string> &ids, double 
         for (auto &k : t.events)
             if (remaining.erase(k.id))
                 k.time += delta;
+    for (auto &cut : s.cameraCuts)
+        if (remaining.erase(cut.id)) cut.time += delta;
+    for (auto &cue : s.audioCues)
+        if (remaining.erase(cue.id)) cue.time += delta;
     if (!remaining.empty())
         return false;
     sortRows(s);
@@ -135,6 +145,8 @@ bool removeSequenceItems(Sequence &s, const std::vector<std::string> &ids) {
         std::erase_if(t.sections, [&](const auto &k) { return remaining.erase(k.id) != 0; });
     for (auto &t : s.eventTracks)
         std::erase_if(t.events, [&](const auto &k) { return remaining.erase(k.id) != 0; });
+    std::erase_if(s.cameraCuts, [&](const auto &cut) { return remaining.erase(cut.id) != 0; });
+    std::erase_if(s.audioCues, [&](const auto &cue) { return remaining.erase(cue.id) != 0; });
     std::erase_if(s.transforms, [](const auto &t) { return t.keys.empty(); });
     std::erase_if(s.animations, [](const auto &t) { return t.sections.empty(); });
     return remaining.empty();
