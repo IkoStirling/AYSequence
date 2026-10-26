@@ -506,3 +506,12 @@ RenderFrameStats.pointGpuTimeMs/pointGpuReadbackTimeMs分别统计四个计算�
 Studio --point-gpu显式启用，--point-gpu-readback再启用带序号样本；--point-cpu保留CPU四边形。JSON增加gpuPointCulling、pointCountsExact、
 gpuPointFallback、gpuPointSampleValid/Serial/Source/Visible及meanPointGpuMs/meanPointGpuReadbackMs。
 CameraRenderView即使没有不透明几何也执行请求的颜色/深度清屏，避免纯点阵或空帧保留上一张输出。
+## Localized text UI projection (2026-10-27)
+
+`SequenceTextPresenter` is an optional UI/Localization adapter, separate from
+the pure Sequence core. It borrows up to 16 distinct caller-owned speaker/body
+TextLabels, resolves active cues from one Evaluation into owned wide text before
+any UI writes, then updates visibility and text in authored cue order. Direct
+seek evaluates without dispatch. Slot overflow and invalid seek leave the old
+presentation untouched; successful rebind hides the previous slots. The game
+owns UI layout, language-change invocation, audio and lifetime ordering.

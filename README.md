@@ -247,6 +247,13 @@ loader 预载 `.aud`、去重注册到 AYAudio，派发时只查找并播放。�
 schema 4；schema 1/2/3 保持可读。作者编辑可移动/删除文字提示，Cooked
 `.sqc` 与 ResourceManager 加载走相同校验。当前编辑器尚无专门的字幕轨道控件。
 
+可选 `AYSequence::UIIntegration` 提供 `SequenceTextPresenter`：将游戏创建并持有的
+最多 16 组 AYUI 说话人/正文 TextLabel 绑定到当前 `Evaluation::textCues`，经
+AYLocalization 解析键并更新文字与可见性。播放帧、暂停、直接 seek 或切换语言后
+都可重新应用同一求值；区间结束会隐藏旧标签。多条重叠提示按作者顺序使用多个
+槽位，槽位不足时整体拒绝并保留当前 UI。缺失翻译显示稳定键以便内容排查。
+游戏仍负责布局、字体样式、播放时钟与 UI 树生命周期。
+
 ### 可选 ResourceManager 加载
 
 根构建同时启用 AYResource 与 Sequence AssetIO 时，链接
