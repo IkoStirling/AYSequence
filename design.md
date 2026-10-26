@@ -534,3 +534,9 @@ clip. A failed load or play keeps the old live voice. The adapter records both
 AudioSubSystem lifecycle serial and engine generation to avoid releasing stale
 clip IDs after restart; the same delivery can then be prepared in the new
 device. Restore-only and empty-key frames stop and release the old voice.
+With AYUI and AYLocalization, `AYSequence::DialogueUIIntegration` reuses the
+validated one-slot SequenceTextPresenter to project a dialogue Presentation's
+speaker/body keys into caller-owned TextLabels. It deliberately does not
+deduplicate delivery keys because language changes must refresh the same
+cursor. An empty text key hides both labels; unresolved translations display
+stable keys. It does not advance a cursor or decide screen layout.

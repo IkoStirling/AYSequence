@@ -265,6 +265,10 @@ AYLocalization 解析键并更新文字与可见性。播放帧、暂停、直�
 切换节点会停止旧声音并释放旧 clip；同键不重播，资源暂缺时保留旧播放并
 允许重试。读档帧只清除旧声音，设备重启后旧句柄失效且可重新加载。
 宿主负责资源键到音频资产的映射、字幕同步和 AudioSubSystem 生命周期。
+同时启用 AYUI/AYLocalization 时，`AYSequence::DialogueUIIntegration` 的
+`DialogueTextPresenter` 将同一交付帧的说话人与正文键映射到宿主持有的两枚
+TextLabel。首次进入、选项提交和读档都可 `apply`；切换语言后重用当前帧
+重新解析，缺失翻译显示稳定键，空节点隐藏标签。游戏仍决定排版与可见时间。
 
 ### 可选 ResourceManager 加载
 
