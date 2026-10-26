@@ -1,5 +1,15 @@
 # AYSequence 设计
 
+## 项目构建接线（2026-10-26）
+
+可选 `AYSequenceCookIntegration` 是作者期转换器；Core 与 AssetIO 仍不依赖
+Resource。转换从 Assets 内普通 `.seq` 生成相对同路径 `.sqc`，输出显式
+`.sqc`→Scene/Animation/Audio 资源边。ProjectBuild 规划时校验所有引用均
+作为未排除、未转换的原路径文件发布，并把引用文件纳入 SHA 缓存键；执行期
+重检，缓存产物的类型、路径、依赖图与包封签名均须与当前内容一致。
+CookShip 在替换旧包前复验包封和闭包。`SequenceConverter` 不复制依赖，
+独立 `.sqc` 文件也需随其依赖共同打包。
+
 ## 场景序列依赖清单（2026-10-25）
 
 AssetIO 可从已校验的 Sequence 提取去重的 Scene、动画和音频路径，并在受信 Assets 根下验证普通文件、阻止符号链接和路径逃逸、逐块计算内容 FNV 指纹。整体签名同时包含规范化序列 JSON 和按类型/路径排序的依赖内容，适合作为构建缓存身份或发布前变更检查，不是安全认证。单文件上限 64 MiB、总依赖 256 MiB、最多 16384 个去重路径。资源在读取后仍可能再变化，实际发布方必须重检；当前不发布 Cook/Pak，也不改 ResourceManager 的散文件加载语义。

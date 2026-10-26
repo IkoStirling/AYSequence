@@ -1,5 +1,14 @@
 # AYSequence
 
+## 项目发布接线（2026-10-26）
+
+启用 Sequence 与 AYResource 作者构建时，ProjectBuild 自动把选为 Cook 的
+`.seq` 转成 `.sqc`。场景、动画、音频引用必须同时作为 Assets 中的原路径资源
+发布；缺失、排除或另行转换该路径会在规划期被拒绝。依赖文件字节参与序列
+缓存键，构建执行前与暂存后会重检内容签名。CookShip 也会校验 `.sqc` 的
+包封和引用闭包，失败保留原包。`AYSequenceCookTool` 仍可单独用于离线转换。
+该流程不负责把字幕键解析为文本，也不自动启动声音或场景播放。
+
 ## 文档预览生命周期（2026-10-20）
 
 LightShowPresenter::releaseResources(renderer) 为 Editor 关闭文档显式回收点阵、出光口、
@@ -253,8 +262,9 @@ schema 4；schema 1/2/3 保持可读。作者编辑可移动/删除文字提示�
 引用均位于 Assets 内的普通文件，并得到去重路径、大小、内容指纹及整体签名。
 发布前应重算以识别计划后的修改。`AYSequenceCookTool source.seq Assets-root
 output.sqc` 将严格作者文件转换为有界、带校验和及依赖内容签名的 `.sqc`；编码
-失败不替换已有输出。目前尚未接入 CookShip/ProjectBuild；调用方须显式
-将引用的场景、动画与音频烘焙、放入发布树并校对闭包。签名用于内容识别，
+失败不替换已有输出。启用资源作者构建时，ProjectBuild 可将选为 Cook 的
+`.seq` 转为同相对路径 `.sqc`，并对所引用的场景、动画与音频执行发布闭包校验；
+CookShip 在替换包前复核 `.sqc` 及依赖。签名用于内容识别，
 不是可信认证或运行时依赖存在性证明。
 
 ## Extended diagnostic observations (2026-10-15)
