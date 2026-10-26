@@ -10,6 +10,8 @@ namespace ayt::sequence {
 /// again after a language switch. This never starts media or advances a cursor.
 class DialogueTextPresenter {
 public:
+    /// A successful bind hides the new pair until the first apply. Invalid
+    /// aliasing preserves the current binding and its visible text.
     [[nodiscard]] bool bind(ui::TextLabel& speaker,ui::TextLabel& body);
     [[nodiscard]] bool apply(const progression::dialogue::Presentation& frame,
                              const localization::Localization& localization);

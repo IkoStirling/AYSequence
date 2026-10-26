@@ -87,6 +87,12 @@ if(TARGET AYSequenceDialogueIntegration AND TARGET AYSequenceUIIntegration)
     target_link_libraries(AYSequenceDialogueUIIntegration PUBLIC
         AYSequenceDialogueIntegration AYSequenceUIIntegration)
 endif()
+if(TARGET AYSequenceDialogueAudioIntegration AND TARGET AYSequenceDialogueUIIntegration)
+    add_library(AYSequenceDialogueMediaIntegration STATIC src/DialogueMediaSession.cpp)
+    add_library(AYSequence::DialogueMediaIntegration ALIAS AYSequenceDialogueMediaIntegration)
+    target_link_libraries(AYSequenceDialogueMediaIntegration PUBLIC
+        AYSequenceDialogueAudioIntegration AYSequenceDialogueUIIntegration)
+endif()
 option(AY_SEQUENCE_BUILD_ENTITY_INTEGRATION "Build optional Entity/Host sequence integration" ${AY_BUILD_RUNTIME})
 if(AY_SEQUENCE_BUILD_ENTITY_INTEGRATION)
     if(NOT TARGET AYEntityCore)

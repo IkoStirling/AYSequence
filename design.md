@@ -540,3 +540,11 @@ speaker/body keys into caller-owned TextLabels. It deliberately does not
 deduplicate delivery keys because language changes must refresh the same
 cursor. An empty text key hides both labels; unresolved translations display
 stable keys. It does not advance a cursor or decide screen layout.
+Binding first hides the new labels; invalid aliasing keeps the prior UI.
+The optional `AYSequence::DialogueMediaIntegration` composes these three
+sinks in sequence → voice → text order. A later failure deliberately leaves
+earlier sinks applied; the caller retries one committed presentation key.
+Sequence/voice suppress duplicate starts while text safely refreshes. This
+keeps dialogue fact commits outside media failure and avoids a cross-system
+rollback promise. The Host owns the resolver, UI labels, audio lifetime and
+single Sequence tick owner.

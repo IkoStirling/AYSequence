@@ -6,7 +6,9 @@ namespace ayt::sequence {
 
 bool DialogueTextPresenter::bind(ui::TextLabel& speaker,ui::TextLabel& body) {
     const std::array slots{SequenceTextSlot{&speaker,&body}};
-    return _presenter.bind(slots);
+    if (!_presenter.bind(slots)) return false;
+    _presenter.clear();
+    return true;
 }
 
 bool DialogueTextPresenter::apply(
