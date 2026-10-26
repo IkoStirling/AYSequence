@@ -527,3 +527,10 @@ playback for a retry. Duplicate keys do not restart playback. Restore-only
 frames and empty sequence cues stop it. The Host owns the resolver, one tick
 owner, scene binding, camera, audio cue dispatch and UI application; this pure
 adapter does not cross World authority or durably acknowledge media delivery.
+When AYAudio and AYResource are also available, the optional
+`AYSequence::DialogueAudioIntegration` resolves one voice key into IAudio,
+registers and starts it on the Voice bus, then retires the previous voice and
+clip. A failed load or play keeps the old live voice. The adapter records both
+AudioSubSystem lifecycle serial and engine generation to avoid releasing stale
+clip IDs after restart; the same delivery can then be prepared in the new
+device. Restore-only and empty-key frames stop and release the old voice.

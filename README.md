@@ -260,6 +260,11 @@ AYLocalization 解析键并更新文字与可见性。播放帧、暂停、直�
 对相同交付键不重启；解析失败保留旧播放并可重试。读档呈现帧不重播序列，
 空键会停止旧序列。宿主以单一时钟调用 `advance`，再将求值/事件/音频提示
 交给现有 Scene、UI 与音频接口；此桥不绑定 World 实体或自动提交镜头。
+同时启用 AYAudio/AYResource 时，`AYSequence::DialogueAudioIntegration` 的
+`DialogueVoicePlayer` 可从同一交付帧解析 `voiceCueKey` 并在 Voice 总线播放。
+切换节点会停止旧声音并释放旧 clip；同键不重播，资源暂缺时保留旧播放并
+允许重试。读档帧只清除旧声音，设备重启后旧句柄失效且可重新加载。
+宿主负责资源键到音频资产的映射、字幕同步和 AudioSubSystem 生命周期。
 
 ### 可选 ResourceManager 加载
 
