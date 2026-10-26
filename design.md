@@ -515,3 +515,15 @@ any UI writes, then updates visibility and text in authored cue order. Direct
 seek evaluates without dispatch. Slot overflow and invalid seek leave the old
 presentation untouched; successful rebind hides the previous slots. The game
 owns UI layout, language-change invocation, audio and lifetime ordering.
+
+## Dialogue Sequence handoff (2026-10-27)
+
+The optional `AYSequence::DialogueIntegration` depends on AYProgression Core
+only when that target exists. `DialogueSequencePlayback::apply` consumes an
+owned, cursor-checked Presentation from the dialogue controller. For a new
+media-bearing delivery key it resolves a compiled Sequence and builds a fresh
+Once player before replacing the old one; failed resolution preserves active
+playback for a retry. Duplicate keys do not restart playback. Restore-only
+frames and empty sequence cues stop it. The Host owns the resolver, one tick
+owner, scene binding, camera, audio cue dispatch and UI application; this pure
+adapter does not cross World authority or durably acknowledge media delivery.

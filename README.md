@@ -254,6 +254,13 @@ AYLocalization 解析键并更新文字与可见性。播放帧、暂停、直�
 槽位，槽位不足时整体拒绝并保留当前 UI。缺失翻译显示稳定键以便内容排查。
 游戏仍负责布局、字体样式、播放时钟与 UI 树生命周期。
 
+可选 `AYSequence::DialogueIntegration` 的 `DialogueSequencePlayback` 可作为
+`AYProgression::dialogue::PresentationController` 的 sink 一部分：宿主以
+`sequenceCueKey` 解析已编译序列，适配器在新节点启动一次性 `SequencePlayer`，
+对相同交付键不重启；解析失败保留旧播放并可重试。读档呈现帧不重播序列，
+空键会停止旧序列。宿主以单一时钟调用 `advance`，再将求值/事件/音频提示
+交给现有 Scene、UI 与音频接口；此桥不绑定 World 实体或自动提交镜头。
+
 ### 可选 ResourceManager 加载
 
 根构建同时启用 AYResource 与 Sequence AssetIO 时，链接
