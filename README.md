@@ -280,7 +280,14 @@ TextLabel。首次进入、选项提交和读档都可 `apply`；切换语言后
 它按清单固定包索引身份，只在台词/语言被请求时读取相应 JSON，在新媒体帧
 需要时解码语音和编译序列；`sequenceResolver()` 与 `voiceLoader()` 可直接交给
 `DialogueMediaSession::present`。包被替换而未重新打开来源时会拒绝旧条目。
+正式进入某份文档前可调用 `preflightDocumentMedia(path)`，顺序解码该文档引用的
+每个不同 Voice/Sequence 键，提前报告缺少绑定、无效媒体或被替换的包条目。
+它不启动播放、不修改已打开来源，也不预留音频/序列；完成后仍按需加载。
 游戏仍选择语言路径、管理 UI/Audio 生命周期及应用序列的 World/相机输出。
+`AYSequenceTownStoryDemo` 把已作者化的 town 对话、双语文本、静音示例 Voice
+及含镜头切换的 Cooked Sequence 放入临时 Pak，再经绑定清单、媒体预检和
+`DialogueMediaSession` 展示选项事实提交、字幕/Voice、镜头选择、游标恢复
+及语言切换。它把镜头选择输出给宿主观察，不自动控制 World 相机。
 
 ### 可选 ResourceManager 加载
 

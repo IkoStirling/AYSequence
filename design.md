@@ -557,3 +557,16 @@ identity, and decode only the requested asset. A failed reopen retains the
 previous source. Index hashes detect accidental replacement, not adversarial
 collisions or a secure package signature. Media playback, locale choice and
 World/camera application remain explicit owner-side operations.
+An optional `preflightDocumentMedia` first decodes one bound document, then
+visits each distinct referenced sequence and voice key in node order. It
+checks the pinned Pak identity and fully decodes each asset, releasing it
+before the next key. Missing bindings, invalid media and changed entries
+return a node/key diagnostic without starting playback or mutating the open
+source. This is a readiness check, not a retained preload, package signature
+or durable media acknowledgement.
+The optional `AYSequenceTownStoryDemo` packages the authored town dialogue,
+two locales, a synthetic Voice clip and a cooked camera-cut Sequence into a
+temporary Pak. It opens the pinned bindings, preflights the document media,
+then executes committed choices against localized TextLabels, Voice playback
+and a restored cursor. Its camera sample is observed rather than bound to a
+World; the game still chooses a camera owner and real media assets.

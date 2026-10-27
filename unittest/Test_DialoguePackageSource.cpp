@@ -49,12 +49,14 @@ TEST_CASE(published_dialogue_resolves_text_voice_and_sequence_without_eager_medi
     Diagnostic sequenceError;
     CHECK(encodeCookedSequence(sequence, packagePath.parent_path(),
         sequenceBytes, &sequenceError));
-    auto writePackage = [&](const std::vector<std::uint8_t>& voice) {
+    auto writePackage = [&](const std::vector<std::uint8_t>& voice,
+                            std::string_view authored = {}) {
+        if (authored.empty()) authored = document;
         auto writer = ayt::storage::IPackageWriter::create(packagePath.string());
         if (!writer) return false;
         return writer->addData(encodedBindings->data(), encodedBindings->size(),
                    "dialogue/bindings.json") &&
-            writer->addData(document.data(), document.size(),
+            writer->addData(authored.data(), authored.size(),
                    "dialogue/intro.dialogue.json") &&
             writer->addData(locale.data(), locale.size(), "locales/en-US.json") &&
             writer->addData(zhLocale.data(), zhLocale.size(), "locales/zh-CN.json") &&
@@ -66,6 +68,8 @@ TEST_CASE(published_dialogue_resolves_text_voice_and_sequence_without_eager_medi
     DialoguePackageSource source;
     std::string error;
     CHECK(source.open(packagePath.string(), "dialogue/bindings.json", &error));
+    CHECK(source.preflightDocumentMedia("dialogue/intro.dialogue.json", &error));
+    CHECK(error.empty());
     CHECK(source.bindings() && source.bindings()->voicePath("voice.welcome") ==
         "audio/welcome.aud");
     CHECK_FALSE(source.open(packagePath.string(), "../bindings.json", &error));
@@ -125,5 +129,16 @@ TEST_CASE(published_dialogue_resolves_text_voice_and_sequence_without_eager_medi
     CHECK(writePackage(std::vector<std::uint8_t>{0, 1, 2}));
     CHECK(source.open(packagePath.string(), "dialogue/bindings.json", &error));
     CHECK(source.loadVoice("voice.welcome", &error) == nullptr);
+    CHECK_FALSE(source.preflightDocumentMedia("dialogue/intro.dialogue.json", &error));
+    CHECK(error.find("first voice voice.welcome") != std::string::npos);
+    CHECK(source.ready());
+    auto unboundDocument=document;
+    const auto cue=unboundDocument.find("voice.welcome");
+    CHECK(cue != std::string::npos);
+    unboundDocument.replace(cue,std::string("voice.welcome").size(),"voice.missing");
+    CHECK(writePackage(voiceBytes,unboundDocument));
+    CHECK(source.open(packagePath.string(),"dialogue/bindings.json",&error));
+    CHECK_FALSE(source.preflightDocumentMedia("dialogue/intro.dialogue.json",&error));
+    CHECK(error.find("voice.missing") != std::string::npos);
 }
 TEST_SUITE_END

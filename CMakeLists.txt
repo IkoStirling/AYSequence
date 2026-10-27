@@ -101,6 +101,16 @@ if(TARGET AYSequenceDialogueMediaIntegration AND TARGET AYSequenceResourceIntegr
         AYSequenceDialogueMediaIntegration AYSequenceResourceIntegration
         AYProgressionJson AYStorage)
 endif()
+if(TARGET AYSequenceDialoguePackageIntegration)
+    add_executable(AYSequenceTownStoryDemo demo/TownStory.cpp)
+    target_link_libraries(AYSequenceTownStoryDemo PRIVATE
+        AYSequenceDialoguePackageIntegration AYSequenceAssetIO AYStorage)
+    target_compile_definitions(AYSequenceTownStoryDemo PRIVATE
+        AY_PROGRESSION_EXAMPLE_DIR="${CMAKE_CURRENT_SOURCE_DIR}/../AYProgression/examples")
+    if(BUILD_TESTING)
+        add_test(NAME AYSequenceTownStoryDemo COMMAND AYSequenceTownStoryDemo)
+    endif()
+endif()
 option(AY_SEQUENCE_BUILD_ENTITY_INTEGRATION "Build optional Entity/Host sequence integration" ${AY_BUILD_RUNTIME})
 if(AY_SEQUENCE_BUILD_ENTITY_INTEGRATION)
     if(NOT TARGET AYEntityCore)

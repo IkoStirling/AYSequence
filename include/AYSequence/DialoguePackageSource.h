@@ -50,6 +50,12 @@ public:
         std::string_view key, std::string* error = nullptr) const;
     [[nodiscard]] std::shared_ptr<resource::IAudio> loadVoice(
         std::string_view key, std::string* error = nullptr) const;
+    /// Decode every distinct voice and sequence cue used by one bound
+    /// document before presenting it. Fails on missing keys, invalid media or
+    /// changed Pak entries; never starts playback or changes this source.
+    /// This is optional and may perform one bounded read/decode per media key.
+    [[nodiscard]] bool preflightDocumentMedia(
+        std::string_view documentPath, std::string* error = nullptr) const;
     /// Borrow this object in PresentationController/DialogueMediaSession sinks.
     /// These functions do IO only when a fresh media-bearing frame requests it.
     [[nodiscard]] DialogueSequenceResolver sequenceResolver() const;

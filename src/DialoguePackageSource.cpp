@@ -7,6 +7,7 @@
 
 #include <algorithm>
 #include <exception>
+#include <set>
 #include <utility>
 
 namespace ayt::sequence {
@@ -193,6 +194,29 @@ std::shared_ptr<resource::IAudio> DialoguePackageSource::loadVoice(
         return {};
     }
     return audio;
+}
+
+bool DialoguePackageSource::preflightDocumentMedia(
+    std::string_view documentPath, std::string* error) const {
+    std::string detail;
+    const auto document = loadDocument(documentPath, &detail);
+    if (!document)
+        return fail(error, "Dialogue document preflight failed: " + detail);
+    std::set<std::string> voices, sequences;
+    for (const auto& node : document->nodes) {
+        if (!node.sequenceCueKey.empty() &&
+            sequences.insert(node.sequenceCueKey).second &&
+            !loadSequence(node.sequenceCueKey, &detail))
+            return fail(error, "Dialogue node " + node.id + " sequence " +
+                node.sequenceCueKey + ": " + detail);
+        if (!node.voiceCueKey.empty() &&
+            voices.insert(node.voiceCueKey).second &&
+            !loadVoice(node.voiceCueKey, &detail))
+            return fail(error, "Dialogue node " + node.id + " voice " +
+                node.voiceCueKey + ": " + detail);
+    }
+    if (error) error->clear();
+    return true;
 }
 
 DialogueSequenceResolver DialoguePackageSource::sequenceResolver() const {
