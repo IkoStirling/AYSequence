@@ -93,6 +93,14 @@ if(TARGET AYSequenceDialogueAudioIntegration AND TARGET AYSequenceDialogueUIInte
     target_link_libraries(AYSequenceDialogueMediaIntegration PUBLIC
         AYSequenceDialogueAudioIntegration AYSequenceDialogueUIIntegration)
 endif()
+if(TARGET AYSequenceDialogueMediaIntegration AND TARGET AYSequenceResourceIntegration
+        AND TARGET AYProgressionJson AND TARGET AYStorage)
+    add_library(AYSequenceDialoguePackageIntegration STATIC src/DialoguePackageSource.cpp)
+    add_library(AYSequence::DialoguePackageIntegration ALIAS AYSequenceDialoguePackageIntegration)
+    target_link_libraries(AYSequenceDialoguePackageIntegration PUBLIC
+        AYSequenceDialogueMediaIntegration AYSequenceResourceIntegration
+        AYProgressionJson AYStorage)
+endif()
 option(AY_SEQUENCE_BUILD_ENTITY_INTEGRATION "Build optional Entity/Host sequence integration" ${AY_BUILD_RUNTIME})
 if(AY_SEQUENCE_BUILD_ENTITY_INTEGRATION)
     if(NOT TARGET AYEntityCore)

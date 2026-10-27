@@ -275,6 +275,12 @@ TextLabel。首次进入、选项提交和读档都可 `apply`；切换语言后
 场景序列、语音，再更新文字；若后一步失败，宿主用相同交付帧重试，
 已启动的序列和语音不会因相同键重复播放。宿主仍负责对话事实提交、
 单一时钟、世界/镜头输出及资源加载，关闭音频与 UI 前先销毁该会话。
+若对话、语言、`.aud` 和 `.sqc` 已由 ProjectBuild 发布到 Pak，可选链接
+`AYSequence::DialoguePackageIntegration` 并打开 `DialoguePackageSource`。
+它按清单固定包索引身份，只在台词/语言被请求时读取相应 JSON，在新媒体帧
+需要时解码语音和编译序列；`sequenceResolver()` 与 `voiceLoader()` 可直接交给
+`DialogueMediaSession::present`。包被替换而未重新打开来源时会拒绝旧条目。
+游戏仍选择语言路径、管理 UI/Audio 生命周期及应用序列的 World/相机输出。
 
 ### 可选 ResourceManager 加载
 

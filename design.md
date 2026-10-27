@@ -548,3 +548,12 @@ Sequence/voice suppress duplicate starts while text safely refreshes. This
 keeps dialogue fact commits outside media failure and avoids a cross-system
 rollback promise. The Host owns the resolver, UI labels, audio lifetime and
 single Sequence tick owner.
+`AYSequence::DialoguePackageIntegration` is a separate optional target over
+Progression JSON, Sequence Resources, Storage and the three dialogue sinks.
+`DialoguePackageSource::open` parses one bounded Pak binding manifest and pins
+the indexed size/hash of every declared document, locale, voice and cooked
+sequence. Later lookups use fresh readers, recheck both manifest and entry
+identity, and decode only the requested asset. A failed reopen retains the
+previous source. Index hashes detect accidental replacement, not adversarial
+collisions or a secure package signature. Media playback, locale choice and
+World/camera application remain explicit owner-side operations.
